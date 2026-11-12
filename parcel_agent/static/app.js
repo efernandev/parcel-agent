@@ -48,13 +48,13 @@ function card(parcel) {
   const location = parcel.location || "Punto de recogida sin indicar";
   const mapUrl = parcel.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([parcel.address, parcel.country].filter(Boolean).join(", "))}` : null;
   const sourceUrl = parcel.message_id ? `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(parcel.message_id)}` : null;
-  return `<article class="parcel" data-id="${escapeHtml(parcel.id)}">
-    <div class="parcel-symbol">${icon("package")}</div>
+  return `<article class="parcel" data-id="${escapeHtml(parcel.id)}" data-country="${escapeHtml(parcel.country || "")}">
+    <div class="parcel-symbol">${icon(hasCode ? "ticket" : "package-open")}</div>
     <div class="parcel-details"><h2>${escapeHtml(parcel.title)}</h2>${deadlineMarkup(parcel.deadline)}
       ${parcel.needs_review ? '<p class="review-note">Sin seguimiento identificado · Comprueba el correo</p>' : ""}
       ${sourceUrl ? `<a class="source-link" href="${sourceUrl}" target="_blank" rel="noopener noreferrer">${icon("mail")} Correo original ${icon("arrow-up-right")}</a>` : ""}
     </div>
-    <div class="parcel-place"><p class="location-label">PUNTO DE RECOGIDA${parcel.country ? ` · ${escapeHtml(parcel.country)}` : ""}</p><p class="location-name">${escapeHtml(location)}</p><p class="address">${escapeHtml(parcel.address || "Direccion no indicada en el correo")}</p>${mapUrl ? `<a class="map-link" href="${mapUrl}" target="_blank" rel="noopener noreferrer">Abrir mapa ${icon("arrow-up-right")}</a>` : ""}</div>
+    <div class="parcel-place"><p class="location-label"><span>PUNTO DE RECOGIDA</span>${parcel.country ? `<span class="country-tag" data-country="${escapeHtml(parcel.country)}"><span class="country-flag" aria-hidden="true"></span>${parcel.country === "FR" ? "Francia" : parcel.country === "CH" ? "Suiza" : escapeHtml(parcel.country)}</span>` : ""}</p><p class="location-name">${escapeHtml(location)}</p><p class="address">${escapeHtml(parcel.address || "Direccion no indicada en el correo")}</p>${mapUrl ? `<a class="map-link" href="${mapUrl}" target="_blank" rel="noopener noreferrer">Abrir mapa ${icon("arrow-up-right")}</a>` : ""}</div>
     <div class="parcel-actions">
       ${hasDocuments || hasCode ? `<button class="button secondary document-button" data-id="${escapeHtml(parcel.id)}">${icon(hasCode && !hasDocuments ? "key-round" : "scan-line")} ${hasCode && !hasDocuments ? "Ver codigo" : "Ver documentos"}</button>` : '<p class="missing-document">Sin QR ni adjunto en este correo. Consulta el original.</p>'}
       <button class="collect-button" data-id="${escapeHtml(parcel.id)}">${icon("check")} Ya lo he recogido</button>

@@ -1,8 +1,11 @@
-# Parcel
+# AlPunto
 
 Bandeja personal de paquetes **disponibles para recoger**. Muestra que paquete
 es, donde esta, hasta cuando puedes recogerlo y los codigos o documentos originales
 del correo. Pensada para vivir en Ginebra y recoger tambien en Francia.
+
+AlPunto es el nombre visible de la aplicacion. Los accesos BAT y el paquete
+`parcel_agent` conservan sus nombres originales para mantener la compatibilidad.
 
 ## Arrancar
 
@@ -231,3 +234,7 @@ uv run --group dev pytest -q
 Los iconos distribuidos en `lucide.min.js` son Lucide 0.468.0, licencia ISC
 (el aviso original esta incluido en el archivo). El QR de demostracion se genera
 con Segno y contiene exclusivamente un texto ficticio.
+
+La interfaz utiliza DM Sans y Sora, distribuidas bajo SIL Open Font License.
+Las fuentes y sus licencias originales se incluyen en `parcel_agent/static/`;
+se sirven desde el propio equipo, sin peticiones a Google Fonts al abrir Parcel.
