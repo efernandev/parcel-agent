@@ -100,6 +100,7 @@ function renderConnection() {
   $("#ai-provider").disabled = locked;
   $("#ai-provider-apply").disabled = locked;
   $("#ai-cloud-consent").disabled = locked;
+  $("#disconnect-button").disabled = !connected || locked;
 }
 
 async function loadParcels() {
@@ -171,7 +172,7 @@ function updateProviderConsent() {
   $("#ai-cloud-consent").checked = false;
   $("#ai-selection-result").textContent = "";
   $("#ai-provider-note").textContent = provider === "gemini"
-    ? "Gemini procesa el texto en Google. Revisa tarifas y condiciones: existen requisitos de servicios de pago para usuarios en Suiza y el EEE."
+    ? "Gemini procesa el texto en Google. La cuota gratuita tiene limites. Para evitar cargos, utiliza un proyecto sin facturacion vinculada y revisa las condiciones aplicables a tu uso."
     : external ? "El texto se envia a OpenAI. Revisa las condiciones y la facturacion de tu cuenta."
       : "El texto se procesa en este PC. No se cambia a un proveedor externo si el modelo local falla.";
 }

@@ -138,6 +138,58 @@ la copia local. Para revocar el permiso en Google, visita
 
 ## Habilitar La IA
 
+### Elegir Entre Ollama Y Gemini
+
+Abre **Conexion y privacidad**, selecciona el proveedor en **Modelo de IA** y
+pulsa **Aplicar modelo**. La seleccion se guarda en SQLite y se conserva al
+reiniciar; tiene prioridad sobre `AI_PROVIDER` de `.env`. No se permite cambiar
+durante una operacion. Seleccionar otro proveedor no inicia una sincronizacion.
+
+No hay cambio automatico: si falla Ollama o Gemini, no se envia el correo a otro
+proveedor. Los correos que fallen quedan sin procesar y pueden reintentarse con
+la siguiente sincronizacion; los ya procesados correctamente no se repiten.
+
+Gemini requiere una clave escrita directamente en `.env` y permiso explicito de
+nube. No pegues la clave en el chat ni la subas a Git:
+
+```dotenv
+GEMINI_API_KEY=tu_clave_privada
+GEMINI_MODEL=gemini-3.6-flash
+ENABLE_CLOUD_AI=true
+```
+
+Reinicia AlPunto, selecciona Gemini Flash y confirma el envio de texto. La clave
+solo existe en el servidor; el selector no la devuelve ni la guarda en SQLite.
+Gemini recibe asunto, cuerpo y fecha, no adjuntos ni tokens de Gmail. Se pide
+JSON estructurado sin herramientas y se conservan las comprobaciones de evidencia.
+OpenAI se mantiene para configuraciones existentes.
+
+La pantalla comprueba configuracion de Gemini, no su facturacion, cuota ni validez
+de la clave. Los errores se detectan al realizar una peticion. Para Ollama tambien
+se comprueba si esta disponible el modelo local seleccionado.
+
+### Gemini: Cuota Gratuita Y Condiciones
+
+La [documentacion de facturacion](https://aistudio.google.com/docs/billing#is-Gemini-free-in-EEA-UK-CH)
+indica que hay nivel gratuito disponible en Suiza. La residencia no implica un
+cargo automatico: el nivel de la clave depende del proyecto al que pertenece.
+Comprueba **Billing Tier** en [Google AI Studio](https://aistudio.google.com/projects).
+
+Si no quieres pagar, utiliza solo un proyecto Free sin cuenta de facturacion
+vinculada. No pulses Set up billing, no compres creditos y no uses una clave de un
+proyecto de pago. La cuota gratuita es limitada; agotarla puede causar errores de
+cuota. AlPunto no crea cuentas de facturacion, no aumenta cuotas ni cambia de plan.
+Tampoco puede imponer un tope de gasto a una clave que ya pertenezca a un proyecto
+de pago. Los presupuestos o limites con retraso no garantizan gasto cero.
+
+Ademas del precio, revisa los [terminos de Gemini](https://aistudio.google.com/docs/terms):
+incluyen requisitos sobre ofrecer aplicaciones a usuarios del EEE, Suiza o Reino
+Unido y reglas de tratamiento de datos que no equivalen a su precio. No asumas
+que disponer de cuota gratuita permite cualquier uso de correos personales.
+Si no puedes confirmar que tu uso esta permitido y sin coste, deja Gemini
+deshabilitado y utiliza Ollama en el PC personal. Nunca utilices un proveedor para
+sortear las restricciones de la organizacion en un ordenador corporativo.
+
 ### Local: Ollama Y Qwen3
 
 La opcion local utiliza **Ollama y Qwen3 8B**, sin clave de OpenAI ni coste por

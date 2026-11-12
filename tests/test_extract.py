@@ -277,6 +277,7 @@ def test_gemini_uses_structured_json_and_keeps_api_key_out_of_url(monkeypatch):
     import json
 
     from parcel_agent.config import Settings
+    from parcel_agent.extract import extract
 
     original_client = httpx.Client
     calls = []
@@ -306,7 +307,7 @@ def test_gemini_uses_structured_json_and_keeps_api_key_out_of_url(monkeypatch):
     monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(transport=transport, **kwargs))
     settings = Settings(_env_file=None, ai_provider="gemini", enable_cloud_ai=True, gemini_api_key="fake-test-key")
     for text in ["Votre colis est disponible", "Your parcel is ready for pickup", "Tu paquete esta disponible para recoger"]:
-        assert len(__import__("parcel_agent.extract", fromlist=["extract"]).extract(message(text), settings)) == 1
+        assert len(extract(message(text), settings)) == 1
     assert calls == ["generativelanguage.googleapis.com"] * 3
 
 
