@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f7f5">
+  <title>Parcel · Tus recogidas</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+  <script defer src="/static/lucide.min.js"></script>
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Parcel, inicio"><span class="brand-icon"><i data-lucide="package-open"></i></span>parcel<span class="brand-dot">.</span></a>
+    <span class="private-label"><i data-lucide="lock-keyhole"></i> Tu espacio personal</span>
+    <button class="icon-button" id="settings-button" title="Conexion y privacidad" aria-label="Conexion y privacidad"><i data-lucide="settings-2"></i></button>
+  </header>
+
+  <main>
+    <section class="heading-row" aria-labelledby="page-title">
+      <div><p class="eyebrow">A UN PASO DE CASA</p><h1 id="page-title">Tus recogidas<span>.</span></h1><p class="heading-note" id="heading-note">Nada pendiente. Todo en su sitio.</p></div>
+      <button class="button primary" id="sync-button"><i data-lucide="refresh-cw"></i><span>Sincronizar Gmail</span></button>
+    </section>
+
+    <section class="connection-band" id="connection-band">
+      <span class="connection-symbol"><i data-lucide="mail"></i></span>
+      <div><strong id="connection-title">Tu bandeja, conectada contigo.</strong><p id="connection-copy">Gmail sin conectar</p></div>
+      <button class="button secondary" id="connect-button"><i data-lucide="link-2"></i><span>Conectar Gmail</span></button>
+    </section>
+
+    <div class="demo-band" id="demo-band" hidden><span><i data-lucide="flask-conical"></i> Datos de ejemplo · Direcciones y codigos ficticios</span><button class="text-button" id="exit-demo">Salir de la demo <i data-lucide="x"></i></button></div>
+    <p id="sync-message" class="sync-message" role="status" aria-live="polite"></p>
+
+    <section aria-label="Paquetes pendientes">
+      <div class="list-toolbar"><div class="list-label">POR RECOGER <span id="parcel-count">0</span></div><div class="filters" aria-label="Filtrar por pais"><button class="filter active" data-country="all" aria-pressed="true">Todos</button><button class="filter" data-country="FR" aria-pressed="false">Francia</button><button class="filter" data-country="CH" aria-pressed="false">Suiza</button></div><span class="sort-label"><i data-lucide="arrow-down-wide-narrow"></i> Fecha limite</span></div>
+      <div id="parcel-list" class="parcel-list"></div>
+      <div class="empty-state" id="empty-state" hidden><div class="empty-symbol"><i data-lucide="package-check"></i></div><h2 id="empty-title">Por aqui, todo recogido.</h2><p id="empty-copy">No hay paquetes pendientes de recoger.</p><button class="button secondary" id="demo-button"><i data-lucide="flask-conical"></i> Ver ejemplo</button></div>
+    </section>
+    <footer><span><i data-lucide="map-pin"></i> De Ginebra al otro lado de la frontera.</span><span>Solo lo que tienes que recoger.</span></footer>
+  </main>
+
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <div class="dialog-header"><h2 id="settings-title">Conexion y privacidad</h2><button class="icon-button close-dialog" title="Cerrar" aria-label="Cerrar"><i data-lucide="x"></i></button></div>
+    <div class="settings-content"><dl id="setup-status"></dl><p>El acceso a Gmail es de solo lectura. Los correos candidatos se envian a OpenAI unicamente al sincronizar y con tu autorizacion en la configuracion local.</p><p>Los permisos y la clave de IA se configuran en el equipo siguiendo el README del proyecto. Nunca introduzcas tus claves en un correo.</p><p>Desconectar elimina la autorizacion guardada en este equipo, no los paquetes ya almacenados. Puedes revocar el permiso tambien desde tu cuenta de Google.</p><button class="button secondary" id="disconnect-button"><i data-lucide="unlink"></i> Desconectar Gmail</button></div>
+  </dialog>
+
+  <dialog id="document-dialog" aria-labelledby="document-title">
+    <div class="dialog-header"><h2 id="document-title">Documento de recogida</h2><button class="icon-button close-dialog" title="Cerrar" aria-label="Cerrar"><i data-lucide="x"></i></button></div>
+    <div id="document-content"></div>
+  </dialog>
+  <div id="toast" class="toast" role="status" hidden><span id="toast-text"></span><button id="undo-button" class="text-button" hidden>Deshacer</button><button id="dismiss-toast" class="icon-button" aria-label="Cerrar aviso" title="Cerrar aviso"><i data-lucide="x"></i></button></div>
+</body>
+</html>

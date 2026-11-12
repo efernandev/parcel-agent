@@ -1,0 +1,22 @@
+[project]
+name = "parcel-agent"
+version = "0.1.0"
+description = "Personal Gmail pickup inbox for France and Switzerland"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.34,<1",
+    "google-api-python-client>=2.160,<3",
+    "google-auth-oauthlib>=1.2,<2",
+    "httpx>=0.28,<1",
+    "keyring>=25,<26",
+    "pydantic-settings>=2.8,<3",
+    "segno>=1.6,<2",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
