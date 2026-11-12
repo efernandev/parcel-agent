@@ -108,31 +108,25 @@ def updates_from(extraction: Extraction, message: dict[str, Any]) -> list[dict[s
 
 
 def extract(message: dict[str, Any], settings: Settings) -> list[dict[str, Any]]:
-    if not settings.enable_cloud_ai or not settings.openai_api_key:
-        raise ValueError("Configura OPENAI_API_KEY y ENABLE_CLOUD_AI=true en .env antes de sincronizar.")
-    if len(message["text"]) > 60_000:
+    if settings.ai_configuration_error:
+        raise ValueError(settings.ai_configuration_error)
+    text_limit = 12_000 if settings.ai_provider == "ollama" else 60_000
+    if len(message["text"]) > text_limit:
         raise ValueError("Correo demasiado largo: se mantiene sin procesar para evitar una lectura parcial.")
-    with httpx.Client(timeout=60) as client:
-        response = client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-            json={
-                "model": settings.openai_model,
-                "messages": [
-                    {"role": "system", "content": PROMPT},
-                    {"role": "user", "content": json.dumps({
-                        "received_at": message["received_at"],
-                        "subject": message["subject"],
-                        "body": message["text"],
-                    }, ensure_ascii=False)},
-                ],
-                "response_format": {"type": "json_schema", "json_schema": {
-                    "name": "pickup_events", "strict": True, "schema": Extraction.model_json_schema(),
-                }},
-            },
-        )
-        response.raise_for_status()
-    content = response.json()["choices"][0]["message"].get("content")
+    messages = [
+        {"role": "system", "content": PROMPT},
+        {"role": "user", "content": json.dumps({
+            "received_at": message["received_at"],
+            "subject": message["subject"],
+            "body": message["text"],
+        }, ensure_ascii=False)},
+    ]
+    if settings.ai_provider == "ollama":
+        content = extract_local(messages, settings)
+    elif settings.ai_provider == "gemini":
+        content = extract_gemini(messages, settings)
+    else:
+        content = extract_cloud(messages, settings)
     if not content:
         raise ValueError("La IA no ha devuelto un resultado. El correo se reintentara.")
     result = Extraction.model_validate_json(content)
@@ -140,3 +134,76 @@ def extract(message: dict[str, Any], settings: Settings) -> list[dict[str, Any]]
     if len(updates) != len(result.events):
         raise ValueError("Extraccion sin evidencia valida. El correo se mantiene pendiente de procesar.")
     return updates
+
+
+def ensure_local_model(settings: Settings) -> None:
+    with httpx.Client(timeout=5, trust_env=False) as client:
+        response = client.get(f"{settings.ollama_url}/api/tags")
+        response.raise_for_status()
+    models = response.json().get("models", [])
+    if not any(model.get("name") == settings.ollama_model for model in models):
+        raise ValueError(f"Falta el modelo local. Descargalo con ollama pull {settings.ollama_model} y recarga AlPunto.")
+
+
+def extract_local(messages: list[dict[str, str]], settings: Settings) -> str | None:
+    with httpx.Client(timeout=300, trust_env=False) as client:
+        response = client.post(
+            f"{settings.ollama_url}/api/chat",
+            json={
+                "model": settings.ollama_model,
+                "messages": messages,
+                "format": Extraction.model_json_schema(),
+                "stream": False,
+                "think": False,
+                "options": {"temperature": 0, "num_ctx": 16_384, "num_predict": 4096},
+            },
+        )
+        response.raise_for_status()
+    result = response.json()
+    if result.get("done") is False or result.get("done_reason") == "length":
+        raise ValueError("Ollama no completo la respuesta. El correo se mantiene sin procesar.")
+    return result.get("message", {}).get("content")
+
+
+def extract_gemini(messages: list[dict[str, str]], settings: Settings) -> str | None:
+    with httpx.Client(timeout=90) as client:
+        response = client.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_model}:generateContent",
+            headers={"x-goog-api-key": settings.gemini_api_key},
+            json={
+                "systemInstruction": {"parts": [{"text": messages[0]["content"]}]},
+                "contents": [{"role": "user", "parts": [{"text": messages[1]["content"]}]}],
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "responseJsonSchema": Extraction.model_json_schema(),
+                    "maxOutputTokens": 4096,
+                },
+            },
+        )
+        response.raise_for_status()
+    result = response.json()
+    candidates = result.get("candidates", [])
+    if result.get("promptFeedback", {}).get("blockReason") or not candidates:
+        raise ValueError("Gemini no devolvio una respuesta util. El correo se mantiene sin procesar.")
+    candidate = candidates[0]
+    if candidate.get("finishReason") != "STOP":
+        raise ValueError("Gemini no completo la respuesta o la bloqueo. El correo se mantiene sin procesar.")
+    parts = candidate.get("content", {}).get("parts", [])
+    return "".join(part.get("text", "") for part in parts if not part.get("thought"))
+
+
+def extract_cloud(messages: list[dict[str, str]], settings: Settings) -> str | None:
+    with httpx.Client(timeout=60) as client:
+        response = client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+            json={
+                "model": settings.openai_model,
+                "messages": messages,
+                "response_format": {"type": "json_schema", "json_schema": {
+                    "name": "pickup_events", "strict": True, "schema": Extraction.model_json_schema(),
+                }},
+            },
+        )
+        response.raise_for_status()
+    return response.json()["choices"][0]["message"].get("content")

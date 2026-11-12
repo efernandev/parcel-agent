@@ -21,6 +21,10 @@ class Store:
                 CREATE TABLE IF NOT EXISTS processed (
                     message_id TEXT PRIMARY KEY
                 );
+                CREATE TABLE IF NOT EXISTS preferences (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
             """)
 
     @contextmanager
@@ -32,6 +36,20 @@ class Store:
                 yield connection
         finally:
             connection.close()
+
+    def selected_ai_provider(self) -> str | None:
+        with self.connection() as connection:
+            row = connection.execute(
+                "SELECT value FROM preferences WHERE key = 'ai_provider'"
+            ).fetchone()
+        return row["value"] if row else None
+
+    def select_ai_provider(self, provider: str) -> None:
+        with self.connection() as connection:
+            connection.execute(
+                "INSERT INTO preferences(key, value) VALUES ('ai_provider', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (provider,),
+            )
 
     def pending(self) -> list[dict[str, Any]]:
         with self.connection() as connection:

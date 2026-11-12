@@ -3,7 +3,7 @@ import threading
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import segno
@@ -12,10 +12,11 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from parcel_agent.config import ROOT, Settings
-from parcel_agent.extract import extract
+from parcel_agent.extract import ensure_local_model, extract
 from parcel_agent.gmail import Gmail
 from parcel_agent.store import Store
 
@@ -23,9 +24,38 @@ from parcel_agent.store import Store
 STATIC = Path(__file__).parent / "static"
 
 
-def public_error(error: Exception) -> str:
+class AISelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: Literal["ollama", "gemini", "openai"]
+    cloud_consent: bool = False
+
+
+def public_error(error: Exception, ai_provider: str | None = None) -> str:
     if isinstance(error, RefreshError):
         return "La autorizacion de Gmail ha caducado o fue revocada. Vuelve a conectar."
+    if ai_provider == "ollama":
+        if isinstance(error, httpx.HTTPStatusError):
+            if error.response.status_code == 404:
+                return "Ollama no encuentra el modelo. Descargalo con ollama pull y revisa OLLAMA_MODEL."
+            return f"Ollama devolvio HTTP {error.response.status_code}. Revisa la instalacion y el modelo local."
+        if isinstance(error, httpx.TimeoutException):
+            return "Ollama ha tardado demasiado. Reintenta o prueba qwen3:4b si el equipo no puede con 8b."
+        if isinstance(error, httpx.RequestError):
+            return "No se pudo conectar con Ollama local. Instala y abre Ollama antes de sincronizar."
+    if isinstance(error, ValidationError):
+        return "La IA devolvio datos con un formato no valido. El correo se mantiene sin procesar."
+    if ai_provider == "gemini":
+        if isinstance(error, httpx.HTTPStatusError):
+            code = error.response.status_code
+            if code == 429:
+                return "Gemini alcanzo una cuota o limite. Revisa Google AI Studio o elige otro modelo; no se cambiara automaticamente."
+            if code in {401, 403}:
+                return "Gemini rechazo el acceso. Revisa GEMINI_API_KEY, los permisos, la region y las condiciones del servicio."
+            if code == 404:
+                return "Gemini no encuentra el modelo. Revisa GEMINI_MODEL y su disponibilidad en tu proyecto."
+            return f"Gemini devolvio HTTP {code}. Reintenta o selecciona otro proveedor."
+        if isinstance(error, httpx.RequestError):
+            return "No se pudo contactar con Gemini. Comprueba la conexion y el acceso permitido por tu red."
     if isinstance(error, httpx.HTTPStatusError):
         return f"El proveedor de IA devolvio HTTP {error.response.status_code}. Revisa la clave, el modelo y el saldo."
     if isinstance(error, HttpError):
@@ -56,6 +86,9 @@ def demo_parcels() -> list[dict[str, Any]]:
 def create_app(settings: Settings | None = None, store: Store | None = None) -> FastAPI:
     settings = settings or Settings()
     store = store or Store(ROOT / "data" / "parcels.db")
+    saved_provider = store.selected_ai_provider()
+    if saved_provider in {"ollama", "gemini", "openai"}:
+        settings = settings.model_copy(update={"ai_provider": saved_provider})
     gmail = Gmail(settings)
     operation_lock = threading.Lock()
     state_lock = threading.Lock()
@@ -128,19 +161,57 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
 
     @app.get("/api/status")
     def status():
+        current_settings = settings
         try:
             connected = gmail.connected()
             credential_error = None
         except Exception:
             connected = False
             credential_error = "No se puede acceder al almacen seguro de credenciales del sistema."
+        ai_error = current_settings.ai_configuration_error
+        if not ai_error and current_settings.ai_provider == "ollama":
+            try:
+                ensure_local_model(current_settings)
+            except Exception as error:
+                ai_error = public_error(error, "ollama")
+        providers = ["ollama", "gemini"]
+        if current_settings.openai_api_key or current_settings.ai_provider == "openai":
+            providers.append("openai")
+        options = []
+        for provider in providers:
+            candidate = current_settings.model_copy(update={"ai_provider": provider})
+            options.append({
+                "provider": provider, "model": candidate.ai_model,
+                "configured": candidate.ai_configured,
+                "label": {"ollama": "Ollama local", "gemini": "Gemini Flash", "openai": "OpenAI"}[provider],
+            })
         return {
             "gmail_connected": connected,
             "google_configured": settings.credentials_path.is_file(),
-            "ai_configured": settings.enable_cloud_ai and bool(settings.openai_api_key),
+            "ai_configured": current_settings.ai_configured,
+            "ai_provider": current_settings.ai_provider,
+            "ai_model": current_settings.ai_model,
+            "ai_options": options,
+            "ai_ready": ai_error is None,
+            "ai_error": ai_error,
             "credential_error": credential_error,
             "sync": snapshot(),
         }
+
+    @app.post("/api/ai/provider", dependencies=[Depends(local_action)])
+    def select_provider(selection: AISelection):
+        nonlocal settings
+        if not operation_lock.acquire(blocking=False):
+            raise HTTPException(409, "Espera a que termine la operacion antes de cambiar de modelo.")
+        try:
+            if selection.provider != "ollama" and not selection.cloud_consent:
+                raise HTTPException(400, "Confirma el envio de correos al proveedor externo antes de seleccionarlo.")
+            updated = settings.model_copy(update={"ai_provider": selection.provider})
+            store.select_ai_provider(selection.provider)
+            settings = updated
+            return status()
+        finally:
+            operation_lock.release()
 
     @app.get("/api/parcels")
     def parcels():
@@ -199,7 +270,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                 except Exception as error:
                     with state_lock:
                         job["failed"] += 1
-                        job["error"] = public_error(error)
+                        job["error"] = public_error(error, settings.ai_provider)
                     if isinstance(error, (httpx.HTTPStatusError, httpx.RequestError)):
                         break
         except Exception as error:
@@ -210,15 +281,26 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
 
     @app.post("/api/sync", status_code=202, dependencies=[Depends(local_action)])
     def sync():
-        if not settings.enable_cloud_ai or not settings.openai_api_key:
-            raise HTTPException(400, "Configura OPENAI_API_KEY y ENABLE_CLOUD_AI=true en .env. Consulta el README.")
         if not operation_lock.acquire(blocking=False):
             raise HTTPException(409, "Hay otra operacion en curso.")
-        update_job(running=True, processed=0, failed=0, limited=False, error=None)
-        workers[:] = [worker for worker in workers if worker.is_alive()]
-        worker = threading.Thread(target=synchronize, daemon=True)
-        workers.append(worker)
-        worker.start()
+        try:
+            if settings.ai_configuration_error:
+                raise HTTPException(400, settings.ai_configuration_error)
+            if settings.ai_provider == "ollama":
+                ensure_local_model(settings)
+            update_job(running=True, processed=0, failed=0, limited=False, error=None,
+                       provider=settings.ai_provider, model=settings.ai_model)
+            workers[:] = [worker for worker in workers if worker.is_alive()]
+            worker = threading.Thread(target=synchronize, daemon=True)
+            workers.append(worker)
+            worker.start()
+        except HTTPException:
+            operation_lock.release()
+            raise
+        except Exception as error:
+            update_job(running=False)
+            operation_lock.release()
+            raise HTTPException(400, public_error(error, settings.ai_provider)) from None
         return snapshot()
 
     @app.post("/api/parcels/{parcel_id}/collect", dependencies=[Depends(local_action)])

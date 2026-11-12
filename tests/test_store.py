@@ -36,3 +36,16 @@ def test_missing_fields_do_not_erase_address(tmp_path):
     store.apply_message("first", [parcel()])
     store.apply_message("second", [dict(parcel(), address=None)])
     assert store.pending()[0]["address"] == parcel()["address"]
+
+
+def test_ai_selection_survives_reopen_without_changing_parcels(tmp_path):
+    path = tmp_path / "parcels.db"
+    store = Store(path)
+    assert store.selected_ai_provider() is None
+    store.apply_message("first", [parcel()])
+    store.select_ai_provider("gemini")
+    reopened = Store(path)
+    assert reopened.selected_ai_provider() == "gemini"
+    assert len(reopened.pending()) == 1
+    reopened.select_ai_provider("ollama")
+    assert store.selected_ai_provider() == "ollama"

@@ -138,8 +138,65 @@ la copia local. Para revocar el permiso en Google, visita
 
 ## Habilitar La IA
 
-Esta version utiliza la API de OpenAI, con facturacion independiente de una
-suscripcion de ChatGPT. La extraccion externa esta **desactivada por defecto**.
+### Local: Ollama Y Qwen3
+
+La opcion local utiliza **Ollama y Qwen3 8B**, sin clave de OpenAI ni coste por
+consulta. El texto se procesa en este PC. Es un candidato multilingue: hay que
+contrastar sus resultados con los correos originales; no se garantiza precision.
+
+Instala [Ollama para Windows](https://ollama.com/download/windows), abre su app
+y descarga el modelo una vez (varios GB):
+
+```powershell
+ollama pull qwen3:8b
+ollama list
+```
+
+Si `ollama pull` falla con `tls: handshake failure`, la descarga no ha terminado.
+Revisa el acceso a los dominios oficiales con el administrador de la red; no
+desactives certificados ni cambies controles corporativos para forzarla. AlPunto
+detecta que falta el modelo y bloquea la sincronizacion antes de consultar Gmail.
+
+En un PC del trabajo, confirma que la instalacion y el tratamiento de correo
+personal estan autorizados. No desactives protecciones del equipo.
+
+La plantilla `.env.example` usa esta configuracion de prueba:
+
+```dotenv
+AI_PROVIDER=ollama
+ENABLE_LOCAL_AI=true
+OLLAMA_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen3:8b
+ENABLE_CLOUD_AI=false
+SYNC_DAYS=7
+SYNC_LIMIT=5
+```
+
+Usala en `.env` sin sobrescribir configuraciones privadas existentes. Reinicia
+AlPunto tras cambiarla. En Conexion y privacidad aparece el proveedor local;
+se comprueba si Ollama responde y el modelo esta descargado. Esta comprobacion
+no mide precision ni velocidad de inferencia.
+
+La primera carga y la inferencia pueden ser lentas, especialmente por CPU.
+Los 32 GB de RAM no garantizan aceleracion de la grafica Intel ni una latencia
+concreta. Si 8B resulta demasiado lento, descarga `qwen3:4b` y cambia `OLLAMA_MODEL`
+a ese nombre. Se admiten `qwen3:4b`, `qwen3:8b` y `qwen3:14b`, no variantes cloud.
+
+AlPunto solo permite una URL de loopback para Ollama, evita el proxy del sistema
+y no recurre automaticamente a OpenAI si falla el modelo local. No expongas el
+puerto de Ollama a la red. Gmail sigue requiriendo Internet para recuperar correo.
+No se envian adjuntos al modelo. Los mensajes de mas de 12.000 caracteres y las
+respuestas incompletas o invalidas quedan sin procesar, sin recortes silenciosos.
+
+Primero valida el modelo con mensajes ficticios. Despues sincroniza una tanda
+pequena y compara puntos, fechas y codigos con Gmail. No se consulta Gmail ni se
+realiza inferencia automaticamente al arrancar la app. Sin coste por tokens no
+significa sin consumo de recursos y electricidad.
+
+### OpenAI Opcional
+
+Se mantiene la API de OpenAI para quien elija un servicio con facturacion
+independiente de ChatGPT. La extraccion externa esta **desactivada por defecto**.
 
 ```powershell
 Copy-Item .env.example .env
@@ -148,6 +205,8 @@ Copy-Item .env.example .env
 Edita `.env` localmente:
 
 ```dotenv
+AI_PROVIDER=openai
+ENABLE_LOCAL_AI=false
 ENABLE_CLOUD_AI=true
 OPENAI_API_KEY=tu_clave_privada
 OPENAI_MODEL=gpt-4.1-mini
@@ -160,12 +219,14 @@ de cambiar la configuracion. **Habilitar la IA y pulsar Sincronizar autoriza el
 envio del asunto, cuerpo y fecha de los correos candidatos a OpenAI**. Pueden
 contener nombres, direcciones y codigos de recogida. No se envian adjuntos ni
 imagenes al modelo. Revisa las condiciones actuales de tratamiento y retencion de
-datos del proveedor antes de usarlo. No hay procesamiento con modelo local todavia.
+datos del proveedor antes de usarlo. No habilites esta opcion si quieres mantener
+el procesamiento local y sin coste por consulta.
 
 ## Uso
 
 - **Sincronizar Gmail** busca avisos de paquetes en frances, ingles y espanol
-	durante los ultimos 90 dias, sin una lista cerrada de transportistas. Vinted,
+	durante la ventana configurada en `SYNC_DAYS` (7 dias en la plantilla inicial),
+    sin una lista cerrada de transportistas. Vinted,
 	InPost, Swiss Post y Ontime no necesitan registrarse individualmente.
 - Solo se muestran recogidas disponibles. Las confirmaciones de recogida o
 	devolucion pueden retirar un paquete cuando comparten identificador.

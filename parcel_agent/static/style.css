@@ -162,3 +162,36 @@ dialog::backdrop { background: #20283e60; }
 	.dialog-header { padding: 16px; }
 	footer { margin-top: 25px; font-size: 10px; }
 }
+
+.ai-provider-form {
+	display: grid;
+	gap: 12px;
+	padding: 20px 24px;
+	border-bottom: 1px solid var(--line);
+}
+.ai-provider-form > label:first-child { font-size: 13px; font-weight: 650; }
+.ai-provider-form select {
+	width: 100%;
+	min-width: 0;
+	min-height: 44px;
+	padding: 10px 12px;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	background: var(--paper);
+	color: var(--ink);
+	font: inherit;
+	font-size: 13px;
+}
+.ai-provider-form select:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.ai-provider-form p { margin: 0; font-size: 12px; line-height: 1.7; color: var(--muted); overflow-wrap: anywhere; }
+.ai-provider-form .button { justify-self: start; }
+.ai-consent { display: flex; align-items: flex-start; gap: 9px; font-size: 12px; line-height: 1.7; }
+.ai-consent input { flex-shrink: 0; width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--accent); }
+#ai-selection-result:empty { display: none; }
+.ai-diagnostic { margin: 0; padding: 14px 24px; font-size: 12px; line-height: 1.7; color: var(--coral); background: var(--coral-light); overflow-wrap: anywhere; }
+#setup-status dt, #setup-status dd { min-width: 0; overflow-wrap: anywhere; }
+#setup-status dd { max-width: 60%; }
+@media (max-width: 600px) {
+	.ai-provider-form { padding: 18px; }
+	.ai-diagnostic { padding-inline: 18px; }
+}

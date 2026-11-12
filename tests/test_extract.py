@@ -110,3 +110,247 @@ def test_structured_provider_response_in_english_and_spanish(monkeypatch):
         assert len(updates) == 1
         assert updates[0]["event"] == "available"
     assert len(calls) == 2
+
+
+def test_local_provider_never_uses_cloud_or_environment_proxy(monkeypatch):
+    import json
+    import httpx
+
+    from parcel_agent.config import Settings
+    from parcel_agent.extract import extract
+
+    original_client = httpx.Client
+    calls = []
+
+    def respond(request):
+        assert str(request.url) == "http://127.0.0.1:11434/api/chat"
+        assert "authorization" not in request.headers
+        payload = json.loads(request.content)
+        assert payload["model"] == "qwen3:8b"
+        assert payload["format"]["additionalProperties"] is False
+        assert payload["think"] is False
+        assert payload["stream"] is False
+        email = json.loads(payload["messages"][1]["content"])
+        assert "attachments" not in email
+        calls.append(email)
+        extraction = Extraction(events=[event(event_quote=email["body"])])
+        return httpx.Response(200, json={"message": {"content": extraction.model_dump_json()}})
+
+    transport = httpx.MockTransport(respond)
+
+    def local_client(**kwargs):
+        assert kwargs["trust_env"] is False
+        return original_client(transport=transport, **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", local_client)
+    settings = Settings(_env_file=None, ai_provider="ollama", enable_local_ai=True)
+    assert not settings.openai_api_key
+    assert not settings.enable_cloud_ai
+    for text in ["Votre colis est disponible", "Your parcel is ready for pickup", "Tu paquete esta disponible para recoger"]:
+        assert len(extract(message(text), settings)) == 1
+    assert len(calls) == 3
+
+
+def test_local_disabled_and_oversized_email_do_not_call_provider(monkeypatch):
+    import httpx
+    import pytest
+
+    from parcel_agent.config import Settings
+    from parcel_agent.extract import extract
+
+    def unexpected_client(**kwargs):
+        raise AssertionError("Provider must not be contacted")
+
+    monkeypatch.setattr(httpx, "Client", unexpected_client)
+    with pytest.raises(ValueError, match="ENABLE_LOCAL_AI"):
+        extract(message("Private"), Settings(_env_file=None, ai_provider="ollama"))
+    with pytest.raises(ValueError, match="demasiado largo"):
+        extract(message("a" * 12_001), Settings(_env_file=None, ai_provider="ollama", enable_local_ai=True))
+
+
+def test_local_rejects_remote_endpoints_and_cloud_model_tags():
+    import pytest
+    from pydantic import ValidationError
+
+    from parcel_agent.config import Settings
+
+    for url in ["http://example.com:11434", "https://127.0.0.1:11434", "http://127.0.0.1:11434/proxy", "http://user:pass@127.0.0.1:11434"]:
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None, ai_provider="ollama", ollama_url=url)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, ai_provider="ollama", ollama_model="qwen3:cloud")
+
+
+def test_local_failure_never_falls_back_to_paid_provider(monkeypatch):
+    import httpx
+    import pytest
+
+    from parcel_agent.config import Settings
+    from parcel_agent.extract import extract
+
+    original_client = httpx.Client
+    calls = []
+
+    def unavailable(request):
+        calls.append(str(request.url))
+        return httpx.Response(404, json={"error": "model not found"})
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(transport=httpx.MockTransport(unavailable), **kwargs))
+    settings = Settings(_env_file=None, ai_provider="ollama", enable_local_ai=True, enable_cloud_ai=True, openai_api_key="fake-test-key")
+    with pytest.raises(httpx.HTTPStatusError):
+        extract(message("Private email"), settings)
+    assert calls == ["http://127.0.0.1:11434/api/chat"]
+
+
+def test_local_incomplete_results_are_not_accepted(monkeypatch):
+    import httpx
+    import pytest
+
+    from parcel_agent.config import Settings
+    from parcel_agent.extract import extract
+
+    original_client = httpx.Client
+    for metadata in [{"done": False}, {"done": True, "done_reason": "length"}]:
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, json=dict(
+            metadata, message={"content": '{"events": []}'},
+        )))
+        monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(transport=transport, **kwargs))
+        with pytest.raises(ValueError, match="no completo"):
+            extract(message("Private email"), Settings(_env_file=None, ai_provider="ollama", enable_local_ai=True))
+
+
+def test_local_model_check_accepts_only_the_configured_download(monkeypatch):
+    import httpx
+    import pytest
+
+    from parcel_agent.config import Settings
+    from parcel_agent.extract import ensure_local_model
+
+    original_client = httpx.Client
+    settings = Settings(_env_file=None, ai_provider="ollama", enable_local_ai=True)
+    for model_name in ["qwen3:8b", "qwen3:4b"]:
+        def respond(request):
+            assert str(request.url) == "http://127.0.0.1:11434/api/tags"
+            return httpx.Response(200, json={"models": [{"name": model_name}]})
+
+        transport = httpx.MockTransport(respond)
+        monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(transport=transport, **kwargs))
+        if model_name == settings.ollama_model:
+            ensure_local_model(settings)
+        else:
+            with pytest.raises(ValueError, match="ollama pull"):
+                ensure_local_model(settings)
+
+
+def test_gemini_configuration_requires_key_and_explicit_cloud_permission():
+    from parcel_agent.config import Settings
+
+    for fields in [{}, {"gemini_api_key": "fake-test-key"}, {"enable_cloud_ai": True}]:
+        settings = Settings(_env_file=None, ai_provider="gemini", **fields)
+        assert settings.ai_configured is False
+        assert "GEMINI_API_KEY" in settings.ai_configuration_error
+    configured = Settings(
+        _env_file=None, ai_provider="gemini", enable_cloud_ai=True, gemini_api_key="fake-test-key",
+    )
+    assert configured.ai_configured is True
+    assert configured.ai_model == "gemini-3.6-flash"
+
+
+def test_gemini_disabled_never_contacts_any_provider(monkeypatch):
+    import httpx
+    import pytest
+
+    from parcel_agent.config import Settings
+
+    def unexpected_client(**kwargs):
+        raise AssertionError("No provider should be contacted")
+
+    monkeypatch.setattr(httpx, "Client", unexpected_client)
+    with pytest.raises(ValueError, match="GEMINI_API_KEY"):
+        from parcel_agent.extract import extract
+
+        extract(message("Private email"), Settings(_env_file=None, ai_provider="gemini"))
+
+
+def test_gemini_uses_structured_json_and_keeps_api_key_out_of_url(monkeypatch):
+    import httpx
+    import json
+
+    from parcel_agent.config import Settings
+
+    original_client = httpx.Client
+    calls = []
+
+    def respond(request):
+        assert str(request.url) == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
+        assert request.headers["x-goog-api-key"] == "fake-test-key"
+        assert "fake-test-key" not in str(request.url)
+        payload = json.loads(request.content)
+        assert payload["generationConfig"]["responseMimeType"] == "application/json"
+        assert payload["generationConfig"]["responseJsonSchema"] == Extraction.model_json_schema()
+        assert "tools" not in payload
+        email = json.loads(payload["contents"][0]["parts"][0]["text"])
+        assert "attachments" not in email
+        assert "sender" not in email
+        calls.append(request.url.host)
+        answer = Extraction(events=[event(event_quote=email["body"])])
+        text = answer.model_dump_json()
+        return httpx.Response(200, json={"candidates": [{
+            "finishReason": "STOP", "content": {"parts": [
+                {"thought": True, "text": "not the JSON answer"},
+                {"text": text[:10]}, {"text": text[10:]},
+            ]},
+        }]})
+
+    transport = httpx.MockTransport(respond)
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(transport=transport, **kwargs))
+    settings = Settings(_env_file=None, ai_provider="gemini", enable_cloud_ai=True, gemini_api_key="fake-test-key")
+    for text in ["Votre colis est disponible", "Your parcel is ready for pickup", "Tu paquete esta disponible para recoger"]:
+        assert len(__import__("parcel_agent.extract", fromlist=["extract"]).extract(message(text), settings)) == 1
+    assert calls == ["generativelanguage.googleapis.com"] * 3
+
+
+def test_gemini_blocked_or_incomplete_responses_are_not_accepted(monkeypatch):
+    import httpx
+    import pytest
+
+    from parcel_agent.config import Settings
+    from parcel_agent.extract import extract
+
+    original_client = httpx.Client
+    responses = [
+        {"promptFeedback": {"blockReason": "SAFETY"}},
+        {"candidates": []},
+        {"candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": [{"text": '{"events": []}'}]}}]},
+        {"candidates": [{"finishReason": "SAFETY"}]},
+    ]
+    settings = Settings(_env_file=None, ai_provider="gemini", enable_cloud_ai=True, gemini_api_key="fake-test-key")
+    for response in responses:
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, json=response))
+        monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(transport=transport, **kwargs))
+        with pytest.raises(ValueError, match="Gemini"):
+            extract(message("Private email"), settings)
+
+
+def test_gemini_quota_error_does_not_switch_provider(monkeypatch):
+    import httpx
+    import pytest
+
+    from parcel_agent.config import Settings
+    from parcel_agent.extract import extract
+
+    original_client = httpx.Client
+    calls = []
+
+    def unavailable(request):
+        calls.append(request.url.host)
+        return httpx.Response(429, json={"error": {"message": "private provider details"}})
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(transport=httpx.MockTransport(unavailable), **kwargs))
+    settings = Settings(
+        _env_file=None, ai_provider="gemini", enable_cloud_ai=True, gemini_api_key="fake-test-key",
+        enable_local_ai=True, openai_api_key="also-configured-but-not-used",
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        extract(message("Private email"), settings)
+    assert calls == ["generativelanguage.googleapis.com"]

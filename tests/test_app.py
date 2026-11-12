@@ -138,3 +138,126 @@ def test_private_settings_reject_public_urls_and_incomplete_identity():
             Settings(_env_file=None, tailscale_url=url, tailscale_user="owner@example.com")
     with pytest.raises(ValidationError):
         Settings(_env_file=None, tailscale_url="https://pc.personal.ts.net:8443")
+
+
+def test_local_status_needs_no_cloud_key(tmp_path, monkeypatch):
+    monkeypatch.setattr("parcel_agent.app.ensure_local_model", lambda settings: None)
+    settings = Settings(_env_file=None, ai_provider="ollama", enable_local_ai=True)
+    with TestClient(create_app(settings, Store(tmp_path / "local.db"))) as browser:
+        status = browser.get("/api/status").json()
+        assert status["ai_configured"] is True
+        assert status["ai_provider"] == "ollama"
+        assert status["ai_model"] == "qwen3:8b"
+        assert status["ai_ready"] is True
+
+
+def test_disabled_local_provider_blocks_sync(tmp_path):
+    settings = Settings(_env_file=None, ai_provider="ollama")
+    with TestClient(create_app(settings, Store(tmp_path / "disabled-local.db"))) as browser:
+        response = browser.post("/api/sync", headers={"X-Parcel-Request": "1"})
+        assert response.status_code == 400
+        assert "ENABLE_LOCAL_AI" in response.json()["detail"]
+
+
+def test_local_errors_do_not_request_payment_or_expose_response():
+    import httpx
+
+    from parcel_agent.app import public_error
+
+    request = httpx.Request("POST", "http://127.0.0.1:11434/api/chat")
+    error = httpx.HTTPStatusError("private response", request=request, response=httpx.Response(404))
+    assert "ollama pull" in public_error(error, "ollama")
+    assert "private response" not in public_error(error, "ollama")
+    assert "Instala y abre Ollama" in public_error(httpx.ConnectError("private", request=request), "ollama")
+
+
+def test_missing_local_model_blocks_sync_before_reading_gmail(tmp_path, monkeypatch):
+    def missing(settings):
+        raise ValueError("Falta el modelo local. Descargalo con ollama pull qwen3:8b.")
+
+    def unexpected_gmail(*args):
+        raise AssertionError("Gmail must not be read without a local model")
+
+    monkeypatch.setattr("parcel_agent.app.ensure_local_model", missing)
+    monkeypatch.setattr("parcel_agent.app.Gmail.candidates", unexpected_gmail)
+    settings = Settings(_env_file=None, ai_provider="ollama", enable_local_ai=True)
+    with TestClient(create_app(settings, Store(tmp_path / "missing.db"))) as browser:
+        status = browser.get("/api/status").json()
+        assert status["ai_configured"] is True
+        assert status["ai_ready"] is False
+        assert "ollama pull" in status["ai_error"]
+        response = browser.post("/api/sync", headers={"X-Parcel-Request": "1"})
+        assert response.status_code == 400
+        assert "ollama pull" in response.json()["detail"]
+
+
+def test_provider_selection_requires_consent_and_persists(tmp_path):
+    settings = Settings(_env_file=None, ai_provider="ollama")
+    path = tmp_path / "selection.db"
+    headers = {"X-Parcel-Request": "1"}
+    with TestClient(create_app(settings, Store(path))) as browser:
+        assert browser.post("/api/ai/provider", json={"provider": "gemini"}).status_code == 403
+        response = browser.post("/api/ai/provider", headers=headers, json={"provider": "gemini"})
+        assert response.status_code == 400
+        assert browser.get("/api/status").json()["ai_provider"] == "ollama"
+        response = browser.post("/api/ai/provider", headers=headers, json={"provider": "gemini", "cloud_consent": True})
+        assert response.status_code == 200
+        assert response.json()["ai_provider"] == "gemini"
+        assert response.json()["ai_ready"] is False
+        assert "GEMINI_API_KEY" in response.json()["ai_error"]
+        assert browser.get("/api/parcels").json() == []
+    with TestClient(create_app(settings, Store(path))) as restarted:
+        assert restarted.get("/api/status").json()["ai_provider"] == "gemini"
+        response = restarted.post("/api/ai/provider", headers=headers, json={"provider": "ollama"})
+        assert response.status_code == 200
+        assert response.json()["ai_provider"] == "ollama"
+
+
+def test_provider_selection_never_returns_keys_or_accepts_invalid_values(tmp_path):
+    settings = Settings(
+        _env_file=None, ai_provider="gemini", enable_cloud_ai=True,
+        gemini_api_key="fake-private-gemini-key", openai_api_key="fake-private-openai-key",
+    )
+    headers = {"X-Parcel-Request": "1"}
+    with TestClient(create_app(settings, Store(tmp_path / "secrets.db"))) as browser:
+        response = browser.get("/api/status")
+        assert "fake-private" not in response.text
+        assert {item["provider"] for item in response.json()["ai_options"]} == {"ollama", "gemini", "openai"}
+        assert browser.post("/api/ai/provider", headers=headers, json={"provider": "unknown"}).status_code == 422
+        assert browser.post("/api/ai/provider", headers=dict(headers, Origin="https://evil.example"), json={"provider": "ollama"}).status_code == 403
+
+
+def test_cannot_change_provider_during_sync(tmp_path, monkeypatch):
+    class HeldWorker:
+        def __init__(self, target, daemon):
+            self.target = target
+
+        def start(self):
+            pass
+
+        def is_alive(self):
+            return True
+
+        def join(self, timeout=None):
+            pass
+
+    monkeypatch.setattr("parcel_agent.app.threading.Thread", HeldWorker)
+    settings = Settings(_env_file=None, ai_provider="gemini", enable_cloud_ai=True, gemini_api_key="fake-test-key")
+    headers = {"X-Parcel-Request": "1"}
+    with TestClient(create_app(settings, Store(tmp_path / "busy.db"))) as browser:
+        assert browser.post("/api/sync", headers=headers).status_code == 202
+        response = browser.post("/api/ai/provider", headers=headers, json={"provider": "ollama"})
+        assert response.status_code == 409
+        assert browser.get("/api/status").json()["ai_provider"] == "gemini"
+
+
+def test_gemini_quota_error_message_contains_no_private_response():
+    import httpx
+
+    from parcel_agent.app import public_error
+
+    request = httpx.Request("POST", "https://generativelanguage.googleapis.com/example")
+    error = httpx.HTTPStatusError("private provider response", request=request, response=httpx.Response(429))
+    result = public_error(error, "gemini")
+    assert "cuota" in result
+    assert "private" not in result

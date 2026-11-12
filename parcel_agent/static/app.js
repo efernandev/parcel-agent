@@ -6,8 +6,10 @@ const icons = () => window.lucide?.createIcons();
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
 const icon = (name) => `<i data-lucide="${name}"></i>`;
 
-async function api(path, method = "GET") {
-  const response = await fetch(path, { method, headers: method === "POST" ? { "X-Parcel-Request": "1" } : {} });
+async function api(path, method = "GET", body = undefined) {
+  const headers = method === "POST" ? { "X-Parcel-Request": "1" } : {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const response = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   let result;
   try { result = await response.json(); } catch { throw new Error("El servidor no ha devuelto una respuesta valida."); }
   if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "No se pudo completar la operacion.");
@@ -87,12 +89,17 @@ function renderConnection() {
   if (!state.status) return;
   const connected = state.status.gmail_connected;
   $("#connection-title").textContent = connected ? "Gmail conectado." : "Tu bandeja, conectada contigo.";
-  $("#connection-copy").textContent = connected ? "Solo lectura · Sincronizacion manual" : "Gmail sin conectar";
+  const providerName = state.status.ai_options?.find((option) => option.provider === state.status.ai_provider)?.label;
+  $("#connection-copy").textContent = connected ? `Solo lectura · ${providerName || "Sincronizacion manual"}` : "Gmail sin conectar";
   $("#connect-button").hidden = connected;
   $("#sync-button").disabled = state.busy || state.status.sync.running || state.demo;
   $("#connect-button").disabled = state.busy || state.status.sync.running;
   $("#sync-button span").textContent = state.status.sync.running ? "Sincronizando…" : "Sincronizar Gmail";
   $("#sync-button svg")?.classList.toggle("spinning", state.status.sync.running);
+  const locked = state.busy || state.status.sync.running;
+  $("#ai-provider").disabled = locked;
+  $("#ai-provider-apply").disabled = locked;
+  $("#ai-cloud-consent").disabled = locked;
 }
 
 async function loadParcels() {
@@ -136,13 +143,37 @@ async function refreshStatus() {
 
 function showSettings() {
   if (!state.status) return;
+  const localAi = state.status.ai_provider === "ollama";
+  const cloudName = state.status.ai_provider === "gemini" ? "Google Gemini" : "OpenAI";
   $("#setup-status").innerHTML = [
     ["Google OAuth", state.status.google_configured ? "Configurado" : "Falta credentials.json"],
     ["Gmail", state.status.gmail_connected ? "Conectado · Solo lectura" : "Sin conectar"],
-    ["IA externa", state.status.ai_configured ? "Habilitada" : "Desactivada o sin clave"],
+    [localAi ? "IA local · Ollama" : `IA externa · ${cloudName}`, !state.status.ai_configured ? "Desactivada o sin configurar" : localAi && state.status.ai_ready === false ? "Modelo no disponible" : `Configurada · ${state.status.ai_model || ""}`],
   ].map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("");
+  $("#ai-readiness").textContent = state.status.ai_error || "";
+  $("#ai-readiness").hidden = !state.status.ai_error;
+  $("#ai-privacy-copy").textContent = localAi
+    ? "Gmail es de solo lectura. Los correos candidatos se procesan con Ollama en este PC, sin enviarlos a proveedores externos. Ollama debe estar abierto y tener el modelo descargado."
+    : `Gmail es de solo lectura. Los correos candidatos se envian a ${cloudName} unicamente al sincronizar y con tu autorizacion. La disponibilidad, el uso de datos y el coste dependen de sus condiciones y de tu proyecto.`;
+  $("#ai-provider").innerHTML = (state.status.ai_options || []).map((option) => `<option value="${escapeHtml(option.provider)}">${escapeHtml(option.label)} · ${escapeHtml(option.model)}${option.configured ? "" : " (sin configurar)"}</option>`).join("");
+  $("#ai-provider").value = state.status.ai_provider;
+  updateProviderConsent();
+  renderConnection();
   $("#disconnect-button").disabled = !state.status.gmail_connected || state.status.sync.running || state.busy;
-  $("#settings-dialog").showModal();
+  if (!$("#settings-dialog").open) $("#settings-dialog").showModal();
+}
+
+function updateProviderConsent() {
+  const provider = $("#ai-provider").value;
+  const external = provider !== "ollama";
+  $("#ai-consent-row").hidden = !external;
+  $("#ai-cloud-consent").required = external;
+  $("#ai-cloud-consent").checked = false;
+  $("#ai-selection-result").textContent = "";
+  $("#ai-provider-note").textContent = provider === "gemini"
+    ? "Gemini procesa el texto en Google. Revisa tarifas y condiciones: existen requisitos de servicios de pago para usuarios en Suiza y el EEE."
+    : external ? "El texto se envia a OpenAI. Revisa las condiciones y la facturacion de tu cuenta."
+      : "El texto se procesa en este PC. No se cambia a un proveedor externo si el modelo local falla.";
 }
 
 function attachmentUrl(attachment) {
@@ -176,6 +207,26 @@ function showDocument(parcel) {
 }
 
 $("#settings-button").onclick = showSettings;
+$("#ai-provider").onchange = updateProviderConsent;
+$("#ai-provider-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const provider = $("#ai-provider").value;
+  const cloudConsent = $("#ai-cloud-consent").checked;
+  if (provider !== "ollama" && !cloudConsent) { $("#ai-cloud-consent").reportValidity(); return; }
+  state.busy = true;
+  renderConnection();
+  try {
+    state.status = await api("/api/ai/provider", "POST", { provider, cloud_consent: cloudConsent });
+    render();
+    showSettings();
+    $("#ai-selection-result").textContent = "Seleccion guardada. No se ha iniciado ninguna sincronizacion.";
+  } catch (error) {
+    $("#ai-selection-result").textContent = error.message;
+  } finally {
+    state.busy = false;
+    renderConnection();
+  }
+};
 $("#demo-button").onclick = async () => {
   try { state.demo = true; state.country = "all"; message(""); await loadParcels(); }
   catch (error) { state.demo = false; message(error.message, true); }
@@ -212,7 +263,7 @@ $("#disconnect-button").onclick = async () => {
 };
 
 $("#sync-button").onclick = async () => {
-  if (!state.status?.gmail_connected || !state.status?.ai_configured) { showSettings(); return; }
+  if (!state.status?.gmail_connected || !state.status?.ai_configured || state.status?.ai_ready === false) { showSettings(); return; }
   state.busy = true;
   renderConnection();
   try { await api("/api/sync", "POST"); await refreshStatus(); showSyncResult(state.status.sync); if (!state.status.sync.running) await loadParcels(); }
