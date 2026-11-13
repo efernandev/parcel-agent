@@ -65,6 +65,10 @@ button:focus-visible, a:focus-visible { outline-color: #2458df; }
 .filter.active { color: var(--accent); box-shadow: 0 1px 4px #26345713; }
 .sort-label { font-size: 11px; }
 .parcel-list { gap: 14px; padding-top: 20px; }
+.pickup-group { display: grid; gap: 10px; min-width: 0; }
+.pickup-group-heading { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-left: 3px solid #9bb1e7; color: #53617e; font-size: 11px; font-weight: 650; }
+.pickup-group-heading svg { width: 16px; height: 16px; color: var(--accent); }
+.pickup-group-items { display: grid; gap: 14px; min-width: 0; }
 .parcel {
 	position: relative;
 	grid-template-columns: 48px minmax(0, 1.15fr) minmax(0, 1.4fr) 170px;

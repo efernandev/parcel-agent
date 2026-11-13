@@ -64,11 +64,29 @@ function card(parcel) {
   </article>`;
 }
 
+function pickupGroupKey(parcel) {
+  const place = parcel.address || parcel.location || parcel.id;
+  const normalized = String(place).normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return `${parcel.country || ""}:${normalized || parcel.id}`;
+}
+
 function render() {
   const visible = state.parcels.filter((parcel) => state.country === "all" || parcel.country === state.country)
     .sort((first, second) => (first.deadline || "9999").localeCompare(second.deadline || "9999"));
+  const groups = new Map();
+  visible.forEach((parcel) => {
+    const key = pickupGroupKey(parcel);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(parcel);
+  });
   $("#parcel-count").textContent = String(visible.length);
-  $("#parcel-list").innerHTML = visible.map(card).join("");
+  $("#parcel-list").innerHTML = [...groups.values()].map((group) => group.length === 1
+    ? card(group[0])
+    : `<section class="pickup-group" aria-label="${group.length} paquetes en el mismo punto">
+        <div class="pickup-group-heading">${icon("map-pin")}<span>${group.length} paquetes comparten punto</span></div>
+        <div class="pickup-group-items">${group.map(card).join("")}</div>
+      </section>`).join("");
   $("#empty-state").hidden = visible.length > 0;
   $("#demo-band").hidden = !state.demo;
   $("#demo-button").hidden = state.demo;
