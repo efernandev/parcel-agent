@@ -30,6 +30,23 @@ def test_limit_reports_unprocessed_remainder():
     assert limited
 
 
+def test_search_query_includes_pickup_point_delivery_phrases():
+    gmail = Gmail(Settings(_env_file=None))
+    service = MagicMock()
+    service.users.return_value.messages.return_value.list.return_value.execute.return_value = {"messages": []}
+    gmail.service = lambda: service
+
+    gmail.candidates(lambda identity: False)
+
+    query = service.users.return_value.messages.return_value.list.call_args.kwargs["q"]
+    assert '"delivered to pickup point"' in query
+    assert '"déposé en point relais"' in query
+    assert '"entregado en punto de recogida"' in query
+    assert "delivered" in query
+    assert "livré" in query
+    assert "entregado" in query
+
+
 def test_legacy_charset_preserves_french_accents():
     import base64
 

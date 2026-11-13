@@ -113,6 +113,25 @@ def test_long_email_with_pickup_cue_stays_pending_with_diagnostic():
     assert "Votre colis" in str(error.value)
 
 
+def test_long_pickup_point_delivery_notices_are_not_ignored():
+    import pytest
+
+    from parcel_agent.config import Settings
+    from parcel_agent.extract import extract
+
+    settings = Settings(
+        _env_file=None, ai_provider="gemini", enable_cloud_ai=True, gemini_api_key="fake-test-key",
+    )
+    for notice in (
+        "Your parcel was delivered to pickup point.",
+        "Votre colis a été déposé en point relais.",
+        "Tu paquete ha sido entregado en punto de recogida.",
+    ):
+        email = message(notice + " Details. " * 7000)
+        with pytest.raises(ValueError, match="Correo demasiado largo"):
+            extract(email, settings)
+
+
 def test_only_gemini_provider_is_supported():
     import pytest
     from pydantic import ValidationError

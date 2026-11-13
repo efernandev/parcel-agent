@@ -19,10 +19,31 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 KEYRING_SERVICE = "parcel-agent.gmail"
 KEYRING_ACCOUNT = "personal"
 SEARCH_TERMS = (
-    '{colis paquet retrait retirer retirer colis "point relais" consigne '
-    'parcel package pickup "pick up" locker collected '
-    'paquete recogida recoger recogido entrega "mise a disposition" '
-    '"mis a disposition" "a disposition" "disponible" "ready for collection"}'
+    '{colis paquet retrait retirer "point relais" "point de retrait" consigne '
+    '"colis disponible" "colis est arrivé" "colis est arrive" '
+    '"arrivé au point relais" "arrive au point relais" '
+    '"livré au point relais" "livre au point relais" '
+    '"déposé en point relais" "depose en point relais" '
+    '"en attente de retrait" "récupérer votre colis" "recuperer votre colis" '
+    '"votre colis vous attend" "mis à disposition" "mis a disposition" '
+    'parcel package pickup "pick up" locker collected delivered '
+    '"pickup point" "collection point" "parcel shop" '
+    '"ready for collection" "available for collection" "ready for pickup" '
+    '"available for pickup" "ready to collect" "collect your parcel" '
+    '"delivered to pickup point" "delivered to parcel shop" "delivered to locker" '
+    '"arrived at pickup point" "awaiting collection" "parcel is waiting" '
+    '"available at the post office" "collect from the post office" '
+    'livré livrée livrés livrées livree '
+    'paquete recogida recoger recogido entrega entregado entregada entregados entregadas '
+    '"punto de recogida" "punto pack" '
+    '"paquete disponible" "listo para recoger" "listo para retirar" '
+    '"disponible para recoger" "disponible para recogida" "disponible para retirar" '
+    '"entregado en punto de recogida" "entregado en un punto de recogida" '
+    '"depositado en punto de recogida" "llegó al punto de recogida" '
+    '"llego al punto de recogida" "ha llegado al punto de recogida" '
+    '"en espera de recogida" "recoger en sucursal" "disponible en sucursal" '
+    '"disponible en oficina de correos" "recoger en oficina de correos" '
+    '"código de recogida" "codigo de recogida"}'
 )
 ALLOWED_MEDIA = {"image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"}
 

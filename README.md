@@ -234,6 +234,9 @@ sortear las restricciones de la organizacion en un ordenador corporativo.
 	durante la ventana configurada en `SYNC_DAYS` (7 dias en la plantilla inicial),
     sin una lista cerrada de transportistas. Vinted,
 	InPost, Swiss Post y Ontime no necesitan registrarse individualmente.
+- Un aviso que dice explicitamente que el paquete del destinatario llego o fue
+	entregado en un punto de recogida, parcel shop, locker u oficina de correos
+	designada para recogerlo tambien cuenta como disponible. Las entregas a domicilio no.
 - Solo se muestran recogidas disponibles. Las confirmaciones de recogida o
 	devolucion pueden retirar un paquete cuando comparten identificador.
 - Las fechas desconocidas se indican como tales. Los plazos vencidos siguen
@@ -251,10 +254,12 @@ sortear las restricciones de la organizacion en un ordenador corporativo.
 
 ## Limites De Esta Primera Version
 
-- No se ha validado todavia con tu cuenta ni con avisos reales de tus transportistas.
-	Hay pruebas locales con datos sinteticos; no equivalen a medir la precision del modelo.
+- Se ha probado con correos reales y el resultado ha sido bueno, aunque eso no
+	equivale a validar todos los transportistas, idiomas y formatos posibles.
 - La busqueda por palabras puede dejar fuera avisos, aunque incluya varios idiomas.
-	El modelo tambien puede equivocarse. Cada dato debe aportar una cita del correo;
+	Los terminos generales de entrega pueden incluir correos irrelevantes que luego
+	se envian a la IA para filtrar. El modelo tambien puede equivocarse. Cada dato
+	debe aportar una cita del correo;
 	comprobar la cita reduce invenciones, pero no garantiza su interpretacion correcta.
 - Se fusionan avisos con el mismo seguimiento. Sin seguimiento se usa el hilo de
 	Gmail y se avisa para revisar; mensajes de distintos hilos pueden quedar duplicados,
