@@ -32,6 +32,18 @@ def test_powershell_script_parses():
     )
 
 
+def test_missing_uv_shows_install_instructions():
+    powershell(sourced("""
+        function Get-Command { return $null }
+        $failed = $false
+        try { Find-Program 'uv.exe' (Join-Path $env:TEMP 'missing-uv.exe') } catch {
+            if ($_.Exception.Message -notmatch 'astral-sh.uv') { throw }
+            $failed = $true
+        }
+        if (-not $failed) { throw 'Missing uv must explain installation' }
+    """))
+
+
 def test_private_connection_uses_exact_dns_and_logged_in_user():
     powershell(sourced("""
         $status = '{"BackendState":"Running","Self":{"DNSName":"PC.personal.ts.net.","UserID":42},"User":{"42":{"LoginName":"Owner@example.com"}}}' | ConvertFrom-Json

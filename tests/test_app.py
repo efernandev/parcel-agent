@@ -213,6 +213,21 @@ def test_provider_selection_requires_consent_and_persists(tmp_path):
         assert response.json()["ai_provider"] == "ollama"
 
 
+def test_selecting_configured_ollama_starts_its_service(tmp_path, monkeypatch):
+    started = []
+    monkeypatch.setattr("parcel_agent.app.start_local_ollama_if_needed", lambda settings: started.append(settings))
+    monkeypatch.setattr("parcel_agent.app.ensure_local_model", lambda settings: None)
+    settings = Settings(_env_file=None, ai_provider="gemini", enable_local_ai=True)
+    headers = {"X-Parcel-Request": "1"}
+    with TestClient(create_app(settings, Store(tmp_path / "ollama-start.db"))) as browser:
+        response = browser.post("/api/ai/provider", headers=headers, json={"provider": "ollama"})
+
+    assert response.status_code == 200
+    assert response.json()["ai_ready"] is True
+    assert len(started) == 1
+    assert started[0].ai_provider == "ollama"
+
+
 def test_provider_selection_never_returns_keys_or_accepts_invalid_values(tmp_path):
     settings = Settings(
         _env_file=None, ai_provider="gemini", enable_cloud_ai=True,

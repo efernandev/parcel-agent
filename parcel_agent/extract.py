@@ -1,6 +1,10 @@
 import hashlib
 import json
+import os
 import re
+import shutil
+import subprocess
+import time
 from datetime import date
 from typing import Any, Literal
 
@@ -143,6 +147,45 @@ def ensure_local_model(settings: Settings) -> None:
     models = response.json().get("models", [])
     if not any(model.get("name") == settings.ollama_model for model in models):
         raise ValueError(f"Falta el modelo local. Descargalo con ollama pull {settings.ollama_model} y recarga AlPunto.")
+
+
+def start_local_ollama_if_needed(settings: Settings) -> None:
+    def check_service() -> None:
+        with httpx.Client(timeout=1, trust_env=False) as client:
+            response = client.get(f"{settings.ollama_url}/api/tags")
+            response.raise_for_status()
+
+    try:
+        check_service()
+        return
+    except httpx.RequestError:
+        pass
+
+    executable = shutil.which("ollama")
+    if not executable:
+        raise ValueError("No se encuentra Ollama en este PC. Instala Ollama o abre su aplicacion.")
+
+    process_options = {}
+    if os.name == "nt":
+        process_options["creationflags"] = subprocess.CREATE_NO_WINDOW
+    else:
+        process_options["start_new_session"] = True
+    try:
+        subprocess.Popen(
+            [executable, "serve"], stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **process_options,
+        )
+    except OSError as error:
+        raise ValueError("No se pudo iniciar Ollama automaticamente. Abre su aplicacion e intenta de nuevo.") from error
+
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        try:
+            check_service()
+            return
+        except httpx.RequestError:
+            time.sleep(0.25)
+    raise ValueError("Ollama no respondio al iniciarse. Abre su aplicacion e intenta de nuevo.")
 
 
 def extract_local(messages: list[dict[str, str]], settings: Settings) -> str | None:

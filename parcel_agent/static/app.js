@@ -154,7 +154,7 @@ function showSettings() {
   $("#ai-readiness").textContent = state.status.ai_error || "";
   $("#ai-readiness").hidden = !state.status.ai_error;
   $("#ai-privacy-copy").textContent = localAi
-    ? "Gmail es de solo lectura. Los correos candidatos se procesan con Ollama en este PC, sin enviarlos a proveedores externos. Ollama debe estar abierto y tener el modelo descargado."
+    ? "Gmail es de solo lectura. Los correos candidatos se procesan con Ollama en este PC, sin enviarlos a proveedores externos. Parcel intenta iniciar Ollama al seleccionarlo; el modelo debe estar descargado."
     : `Gmail es de solo lectura. Los correos candidatos se envian a ${cloudName} unicamente al sincronizar y con tu autorizacion. La disponibilidad, el uso de datos y el coste dependen de sus condiciones y de tu proyecto.`;
   $("#ai-provider").innerHTML = (state.status.ai_options || []).map((option) => `<option value="${escapeHtml(option.provider)}">${escapeHtml(option.label)} · ${escapeHtml(option.model)}${option.configured ? "" : " (sin configurar)"}</option>`).join("");
   $("#ai-provider").value = state.status.ai_provider;

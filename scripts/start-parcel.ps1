@@ -23,6 +23,9 @@ function Find-Program([string]$Name, [string]$Fallback) {
     $command = Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
     if (Test-Path -LiteralPath $Fallback -PathType Leaf) { return $Fallback }
+    if ($Name -eq 'uv.exe') {
+        throw 'No se encuentra uv. Instalala con winget install --id=astral-sh.uv -e o desde https://docs.astral.sh/uv/getting-started/installation/ y vuelve a abrir este acceso.'
+    }
     throw "No se encuentra $Name. Instala el programa y vuelve a abrir este acceso."
 }
 

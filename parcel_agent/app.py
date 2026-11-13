@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from parcel_agent.config import ROOT, Settings
-from parcel_agent.extract import ensure_local_model, extract
+from parcel_agent.extract import ensure_local_model, extract, start_local_ollama_if_needed
 from parcel_agent.gmail import Gmail
 from parcel_agent.store import Store
 
@@ -209,7 +209,16 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             updated = settings.model_copy(update={"ai_provider": selection.provider})
             store.select_ai_provider(selection.provider)
             settings = updated
-            return status()
+            startup_error = None
+            if selection.provider == "ollama" and updated.ai_configured:
+                try:
+                    start_local_ollama_if_needed(updated)
+                except (ValueError, httpx.HTTPStatusError) as error:
+                    startup_error = public_error(error, "ollama")
+            result = status()
+            if startup_error and not result["ai_ready"]:
+                result["ai_error"] = startup_error
+            return result
         finally:
             operation_lock.release()
 

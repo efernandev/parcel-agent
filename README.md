@@ -70,6 +70,47 @@ No son un ejecutable independiente ni requieren permisos de administrador para
 arrancar Parcel. Si Windows bloquea un archivo descargado, revisa su procedencia y
 sus propiedades; no desactives globalmente las protecciones del equipo.
 
+## Primer Arranque En Otro PC Windows
+
+1. Copia el proyecto completo a una carpeta del otro PC o clona el repositorio.
+	No copies `.venv`: se crea de nuevo en cada equipo. Asegurate de que esten
+	incluidos `uv.lock`, `pyproject.toml`, `scripts/` y `parcel_agent/`.
+2. Instala `uv` una vez desde PowerShell:
+
+	```powershell
+	winget install --id=astral-sh.uv -e
+	```
+
+	Tambien puedes usar el instalador oficial de `uv`. No hace falta instalar
+	Python manualmente: al abrir **`Iniciar Parcel.bat`**, `uv` instala una version
+	compatible de Python y prepara las dependencias fijadas en `uv.lock`.
+3. Para usar Ollama, crea `.env` a partir de la plantilla si aun no existe:
+
+	```powershell
+	Copy-Item .env.example .env
+	```
+
+	Instala Ollama y descarga el modelo indicado en `.env` con `ollama pull
+	qwen3:8b`. Al seleccionar Ollama, Parcel intenta iniciar su servicio en segundo
+	plano si no esta activo; el comando `ollama` debe estar disponible en PATH. Si usas Gemini u OpenAI,
+	configura sus claves localmente en `.env` siguiendo sus secciones de este
+	README; nunca subas `.env` a Git. Sin una IA configurada puedes abrir la demo,
+	pero no sincronizar correos reales.
+4. Para conectar Gmail, coloca el JSON OAuth de tipo **Desktop app** en la raiz
+	del proyecto como `credentials.json`. Puedes descargarlo de tu proyecto Google
+	Cloud o transferirlo de forma privada; no lo subas a Git. Pulsa **Conectar
+	Gmail** desde el navegador del PC y autoriza la cuenta. La autorizacion se
+	guarda en el almacen de credenciales de Windows, asi que hay que autorizarla
+	de nuevo en cada PC; no copies tokens del otro equipo.
+5. Haz doble clic en **`Iniciar Parcel.bat`**. La primera vez necesita Internet
+	para preparar Python y las dependencias. Se abrira `http://127.0.0.1:8765`;
+	**Ver ejemplo** funciona sin Gmail ni IA. Para el acceso movil, configura
+	Tailscale aparte siguiendo la seccion siguiente.
+
+La base de datos `data/parcels.db` y `.env` no se incluyen en Git. Si necesitas
+conservar el historial, detén Parcel y transfiere la base de datos de forma
+privada. No es necesario copiarla para una instalacion nueva.
+
 ## Movil U Otro PC: Acceso Privado
 
 Configuracion inicial, una sola vez:
@@ -225,9 +266,11 @@ SYNC_LIMIT=5
 ```
 
 Usala en `.env` sin sobrescribir configuraciones privadas existentes. Reinicia
-AlPunto tras cambiarla. En Conexion y privacidad aparece el proveedor local;
-se comprueba si Ollama responde y el modelo esta descargado. Esta comprobacion
-no mide precision ni velocidad de inferencia.
+AlPunto tras cambiarla. En Conexion y privacidad, al aplicar Ollama, Parcel
+intenta iniciar el servicio en segundo plano si no responde. No abre la interfaz
+visual de Ollama; el comando `ollama` debe estar disponible en PATH. Se comprueba
+si Ollama responde y el modelo esta descargado. Esta comprobacion no mide
+precision ni velocidad de inferencia.
 
 La primera carga y la inferencia pueden ser lentas, especialmente por CPU.
 Los 32 GB de RAM no garantizan aceleracion de la grafica Intel ni una latencia
