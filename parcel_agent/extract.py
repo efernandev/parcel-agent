@@ -122,6 +122,7 @@ def updates_from(extraction: Extraction, message: dict[str, Any]) -> list[dict[s
             "evidence": event.event_quote,
             "needs_review": not reliable_tracking,
             "message_id": message["id"],
+            "thread_id": message["thread_id"],
             "attachments": [dict(item, message_id=message["id"]) for item in message["attachments"]],
         })
     return updates

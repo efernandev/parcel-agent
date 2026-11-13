@@ -30,6 +30,7 @@ def test_unknown_carrier_and_french_evidence():
     assert result["deadline"] == "2026-11-15"
     assert result["pickup_code"] == "123456"
     assert result["needs_review"]
+    assert result["thread_id"] == "thread1"
 
 
 def test_invented_values_and_dates_are_not_accepted():

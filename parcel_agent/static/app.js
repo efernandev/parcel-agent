@@ -49,7 +49,9 @@ function card(parcel) {
   const hasCode = Boolean(parcel.pickup_code);
   const location = parcel.location || "Punto de recogida sin indicar";
   const mapUrl = parcel.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([parcel.address, parcel.country].filter(Boolean).join(", "))}` : null;
-  const sourceUrl = parcel.message_id ? `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(parcel.message_id)}` : null;
+  const sourceUrl = parcel.thread_id
+    ? `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(parcel.thread_id)}`
+    : parcel.message_id ? `/api/gmail/open/${encodeURIComponent(parcel.message_id)}` : null;
   return `<article class="parcel" data-id="${escapeHtml(parcel.id)}" data-country="${escapeHtml(parcel.country || "")}">
     <div class="parcel-symbol">${icon(hasCode ? "ticket" : "package-open")}</div>
     <div class="parcel-details"><h2>${escapeHtml(parcel.title)}</h2>${deadlineMarkup(parcel.deadline)}

@@ -56,6 +56,23 @@ def test_original_pdf_can_be_framed_only_by_our_app(tmp_path, monkeypatch):
         assert "frame-ancestors 'self'" in response.headers["content-security-policy"]
 
 
+def test_original_email_link_redirects_to_gmail_thread(tmp_path, monkeypatch):
+    from parcel_agent.gmail import Gmail
+
+    store = Store(tmp_path / "source-link.db")
+    store.apply_message("mail-123", [{
+        "id": "tracking:ABC123456", "title": "Libro", "event": "available",
+        "received_at": "2026-11-12T10:00:00+00:00", "message_id": "mail-123",
+    }])
+    monkeypatch.setattr(Gmail, "thread_id_for_message", lambda self, message_id: "thread-456")
+
+    with TestClient(create_app(Settings(_env_file=None), store)) as browser:
+        response = browser.get("/api/gmail/open/mail-123", follow_redirects=False)
+        assert response.status_code == 307
+        assert response.headers["location"] == "https://mail.google.com/mail/u/0/#all/thread-456"
+        assert browser.get("/api/gmail/open/unknown", follow_redirects=False).status_code == 404
+
+
 def test_sync_pipeline_and_manual_collection(tmp_path, monkeypatch):
     import importlib
 

@@ -4,11 +4,12 @@ from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 
 import httpx
 import segno
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
@@ -296,6 +297,18 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         if not store.collect(parcel_id, False):
             raise HTTPException(404, "Paquete no encontrado.")
         return {"collected": False}
+
+    @app.get("/api/gmail/open/{message_id}")
+    def open_gmail_message(message_id: str):
+        if not any(item.get("message_id") == message_id for item in store.pending()):
+            raise HTTPException(404, "Correo no encontrado en tus recogidas pendientes.")
+        try:
+            thread_id = gmail.thread_id_for_message(message_id)
+            return RedirectResponse(
+                f"https://mail.google.com/mail/u/0/#all/{quote(thread_id, safe='')}"
+            )
+        except Exception as error:
+            raise HTTPException(400, public_error(error)) from None
 
     @app.get("/api/attachments/{message_id}/{part_id}")
     def attachment(message_id: str, part_id: str):

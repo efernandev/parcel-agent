@@ -164,6 +164,12 @@ class Gmail:
         ).execute()
         return read_message(raw)
 
+    def thread_id_for_message(self, message_id: str) -> str:
+        raw = self.service().users().messages().get(
+            userId="me", id=message_id, format="minimal"
+        ).execute()
+        return raw["threadId"]
+
     def attachment(self, message_id: str, part_id: str) -> tuple[bytes, str]:
         service = self.service()
         raw = service.users().messages().get(userId="me", id=message_id, format="full").execute()
