@@ -28,7 +28,7 @@ def test_mutations_require_same_origin_custom_header(tmp_path):
         assert browser.post("/api/sync", headers={"X-Parcel-Request": "1", "Origin": "https://evil.example"}).status_code == 403
         response = browser.post("/api/sync", headers={"X-Parcel-Request": "1"})
         assert response.status_code == 400
-        assert "OPENAI_API_KEY" in response.json()["detail"]
+        assert "GEMINI_API_KEY" in response.json()["detail"]
 
 
 def test_security_headers_and_inaccessible_attachments(tmp_path):
@@ -75,7 +75,7 @@ def test_sync_pipeline_and_manual_collection(tmp_path, monkeypatch):
             pass
 
     store = Store(tmp_path / "sync.db")
-    settings = Settings(_env_file=None, enable_cloud_ai=True, openai_api_key="fake-test-key")
+    settings = Settings(_env_file=None, enable_cloud_ai=True, gemini_api_key="fake-test-key")
     monkeypatch.setattr(app_module.threading, "Thread", ImmediateWorker)
     monkeypatch.setattr(app_module.Gmail, "candidates", lambda self, processed: ([{"id": "email1"}] if not processed("email1") else [], False))
     monkeypatch.setattr(app_module.Gmail, "message", lambda self, identity: {"id": identity, "received_at": "2026-11-12T10:00:00+00:00"})
@@ -91,6 +91,47 @@ def test_sync_pipeline_and_manual_collection(tmp_path, monkeypatch):
         assert browser.get("/api/parcels").json() == []
         assert browser.post("/api/parcels/tracking:ABC123456/restore", headers=headers).status_code == 200
         assert len(browser.get("/api/parcels").json()) == 1
+
+
+def test_sync_counts_and_marks_obviously_irrelevant_long_email(tmp_path, monkeypatch):
+    import importlib
+
+    from parcel_agent.extract import IgnoredLongEmail
+
+    app_module = importlib.import_module("parcel_agent.app")
+
+    class ImmediateWorker:
+        def __init__(self, target, daemon):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+        def is_alive(self):
+            return False
+
+        def join(self, timeout=None):
+            pass
+
+    store = Store(tmp_path / "ignored.db")
+    settings = Settings(_env_file=None, ai_provider="gemini", enable_cloud_ai=True, gemini_api_key="fake-test-key")
+    monkeypatch.setattr(app_module.threading, "Thread", ImmediateWorker)
+    monkeypatch.setattr(app_module.Gmail, "candidates", lambda self, processed: ([{"id": "transit-email"}], False))
+    monkeypatch.setattr(app_module.Gmail, "message", lambda self, identity: {
+        "id": identity, "received_at": "2026-11-12T10:00:00+00:00",
+    })
+
+    def ignore_long_email(email, configuration):
+        raise IgnoredLongEmail
+
+    monkeypatch.setattr(app_module, "extract", ignore_long_email)
+    with TestClient(create_app(settings, store)) as browser:
+        response = browser.post("/api/sync", headers={"X-Parcel-Request": "1"})
+
+    assert response.status_code == 202
+    assert response.json()["ignored"] == 1
+    assert response.json()["failed"] == 0
+    assert store.is_processed("transit-email")
 
 
 def test_private_access_requires_exact_host_and_owner(tmp_path):
@@ -140,66 +181,29 @@ def test_private_settings_reject_public_urls_and_incomplete_identity():
         Settings(_env_file=None, tailscale_url="https://pc.personal.ts.net:8443")
 
 
-def test_local_status_needs_no_cloud_key(tmp_path, monkeypatch):
-    monkeypatch.setattr("parcel_agent.app.ensure_local_model", lambda settings: None)
-    settings = Settings(_env_file=None, ai_provider="ollama", enable_local_ai=True)
-    with TestClient(create_app(settings, Store(tmp_path / "local.db"))) as browser:
+def test_status_uses_only_gemini_and_ignores_unknown_saved_provider(tmp_path):
+    settings = Settings(_env_file=None)
+    store = Store(tmp_path / "legacy-provider.db")
+    store.select_ai_provider("legacy-provider")
+    with TestClient(create_app(settings, store)) as browser:
         status = browser.get("/api/status").json()
-        assert status["ai_configured"] is True
-        assert status["ai_provider"] == "ollama"
-        assert status["ai_model"] == "qwen3:8b"
-        assert status["ai_ready"] is True
 
-
-def test_disabled_local_provider_blocks_sync(tmp_path):
-    settings = Settings(_env_file=None, ai_provider="ollama")
-    with TestClient(create_app(settings, Store(tmp_path / "disabled-local.db"))) as browser:
-        response = browser.post("/api/sync", headers={"X-Parcel-Request": "1"})
-        assert response.status_code == 400
-        assert "ENABLE_LOCAL_AI" in response.json()["detail"]
-
-
-def test_local_errors_do_not_request_payment_or_expose_response():
-    import httpx
-
-    from parcel_agent.app import public_error
-
-    request = httpx.Request("POST", "http://127.0.0.1:11434/api/chat")
-    error = httpx.HTTPStatusError("private response", request=request, response=httpx.Response(404))
-    assert "ollama pull" in public_error(error, "ollama")
-    assert "private response" not in public_error(error, "ollama")
-    assert "Instala y abre Ollama" in public_error(httpx.ConnectError("private", request=request), "ollama")
-
-
-def test_missing_local_model_blocks_sync_before_reading_gmail(tmp_path, monkeypatch):
-    def missing(settings):
-        raise ValueError("Falta el modelo local. Descargalo con ollama pull qwen3:8b.")
-
-    def unexpected_gmail(*args):
-        raise AssertionError("Gmail must not be read without a local model")
-
-    monkeypatch.setattr("parcel_agent.app.ensure_local_model", missing)
-    monkeypatch.setattr("parcel_agent.app.Gmail.candidates", unexpected_gmail)
-    settings = Settings(_env_file=None, ai_provider="ollama", enable_local_ai=True)
-    with TestClient(create_app(settings, Store(tmp_path / "missing.db"))) as browser:
-        status = browser.get("/api/status").json()
-        assert status["ai_configured"] is True
-        assert status["ai_ready"] is False
-        assert "ollama pull" in status["ai_error"]
-        response = browser.post("/api/sync", headers={"X-Parcel-Request": "1"})
-        assert response.status_code == 400
-        assert "ollama pull" in response.json()["detail"]
+    assert status["ai_provider"] == "gemini"
+    assert status["ai_configured"] is False
+    assert status["ai_ready"] is False
+    assert "GEMINI_API_KEY" in status["ai_error"]
+    assert {item["provider"] for item in status["ai_options"]} == {"gemini"}
 
 
 def test_provider_selection_requires_consent_and_persists(tmp_path):
-    settings = Settings(_env_file=None, ai_provider="ollama")
+    settings = Settings(_env_file=None)
     path = tmp_path / "selection.db"
     headers = {"X-Parcel-Request": "1"}
     with TestClient(create_app(settings, Store(path))) as browser:
         assert browser.post("/api/ai/provider", json={"provider": "gemini"}).status_code == 403
         response = browser.post("/api/ai/provider", headers=headers, json={"provider": "gemini"})
         assert response.status_code == 400
-        assert browser.get("/api/status").json()["ai_provider"] == "ollama"
+        assert browser.get("/api/status").json()["ai_provider"] == "gemini"
         response = browser.post("/api/ai/provider", headers=headers, json={"provider": "gemini", "cloud_consent": True})
         assert response.status_code == 200
         assert response.json()["ai_provider"] == "gemini"
@@ -208,38 +212,23 @@ def test_provider_selection_requires_consent_and_persists(tmp_path):
         assert browser.get("/api/parcels").json() == []
     with TestClient(create_app(settings, Store(path))) as restarted:
         assert restarted.get("/api/status").json()["ai_provider"] == "gemini"
-        response = restarted.post("/api/ai/provider", headers=headers, json={"provider": "ollama"})
-        assert response.status_code == 200
-        assert response.json()["ai_provider"] == "ollama"
-
-
-def test_selecting_configured_ollama_starts_its_service(tmp_path, monkeypatch):
-    started = []
-    monkeypatch.setattr("parcel_agent.app.start_local_ollama_if_needed", lambda settings: started.append(settings))
-    monkeypatch.setattr("parcel_agent.app.ensure_local_model", lambda settings: None)
-    settings = Settings(_env_file=None, ai_provider="gemini", enable_local_ai=True)
-    headers = {"X-Parcel-Request": "1"}
-    with TestClient(create_app(settings, Store(tmp_path / "ollama-start.db"))) as browser:
-        response = browser.post("/api/ai/provider", headers=headers, json={"provider": "ollama"})
-
-    assert response.status_code == 200
-    assert response.json()["ai_ready"] is True
-    assert len(started) == 1
-    assert started[0].ai_provider == "ollama"
 
 
 def test_provider_selection_never_returns_keys_or_accepts_invalid_values(tmp_path):
     settings = Settings(
         _env_file=None, ai_provider="gemini", enable_cloud_ai=True,
-        gemini_api_key="fake-private-gemini-key", openai_api_key="fake-private-openai-key",
+        gemini_api_key="fake-private-gemini-key",
     )
     headers = {"X-Parcel-Request": "1"}
     with TestClient(create_app(settings, Store(tmp_path / "secrets.db"))) as browser:
         response = browser.get("/api/status")
         assert "fake-private" not in response.text
-        assert {item["provider"] for item in response.json()["ai_options"]} == {"ollama", "gemini", "openai"}
-        assert browser.post("/api/ai/provider", headers=headers, json={"provider": "unknown"}).status_code == 422
-        assert browser.post("/api/ai/provider", headers=dict(headers, Origin="https://evil.example"), json={"provider": "ollama"}).status_code == 403
+        assert {item["provider"] for item in response.json()["ai_options"]} == {"gemini"}
+        assert browser.post("/api/ai/provider", headers=headers, json={"provider": "unsupported"}).status_code == 422
+        assert browser.post(
+            "/api/ai/provider", headers=dict(headers, Origin="https://evil.example"),
+            json={"provider": "gemini", "cloud_consent": True},
+        ).status_code == 403
 
 
 def test_cannot_change_provider_during_sync(tmp_path, monkeypatch):
@@ -261,7 +250,9 @@ def test_cannot_change_provider_during_sync(tmp_path, monkeypatch):
     headers = {"X-Parcel-Request": "1"}
     with TestClient(create_app(settings, Store(tmp_path / "busy.db"))) as browser:
         assert browser.post("/api/sync", headers=headers).status_code == 202
-        response = browser.post("/api/ai/provider", headers=headers, json={"provider": "ollama"})
+        response = browser.post("/api/ai/provider", headers=headers, json={
+            "provider": "gemini", "cloud_consent": True,
+        })
         assert response.status_code == 409
         assert browser.get("/api/status").json()["ai_provider"] == "gemini"
 

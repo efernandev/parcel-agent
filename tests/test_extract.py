@@ -83,163 +83,43 @@ def test_cloud_disabled_never_sends_email():
         extract(message("Private email"), Settings(_env_file=None, enable_cloud_ai=False))
 
 
-def test_structured_provider_response_in_english_and_spanish(monkeypatch):
-    import httpx
+def test_long_email_without_pickup_cue_is_marked_ignorable_before_ai_call():
+    import pytest
 
     from parcel_agent.config import Settings
-    from parcel_agent.extract import extract
+    from parcel_agent.extract import IgnoredLongEmail, extract
 
-    original_client = httpx.Client
-    calls = []
+    email = message("A personal newsletter about local events. " * 5000)
+    settings = Settings(_env_file=None, ai_provider="gemini", enable_cloud_ai=True, gemini_api_key="fake-test-key")
 
-    def respond(request):
-        import json
-
-        payload = json.loads(request.content)
-        email = json.loads(payload["messages"][1]["content"])
-        assert "attachments" not in email
-        calls.append(email)
-        result = Extraction(events=[event(event_quote=email["body"])])
-        return httpx.Response(200, json={"choices": [{"message": {"content": result.model_dump_json()}}]})
-
-    transport = httpx.MockTransport(respond)
-    monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(transport=transport, **kwargs))
-    settings = Settings(_env_file=None, enable_cloud_ai=True, openai_api_key="fake-test-key")
-    for text in ["Your parcel is ready for pickup", "Tu paquete esta disponible para recoger"]:
-        updates = extract(message(text), settings)
-        assert len(updates) == 1
-        assert updates[0]["event"] == "available"
-    assert len(calls) == 2
+    with pytest.raises(IgnoredLongEmail):
+        extract(email, settings)
 
 
-def test_local_provider_never_uses_cloud_or_environment_proxy(monkeypatch):
-    import json
-    import httpx
-
-    from parcel_agent.config import Settings
-    from parcel_agent.extract import extract
-
-    original_client = httpx.Client
-    calls = []
-
-    def respond(request):
-        assert str(request.url) == "http://127.0.0.1:11434/api/chat"
-        assert "authorization" not in request.headers
-        payload = json.loads(request.content)
-        assert payload["model"] == "qwen3:8b"
-        assert payload["format"]["additionalProperties"] is False
-        assert payload["think"] is False
-        assert payload["stream"] is False
-        email = json.loads(payload["messages"][1]["content"])
-        assert "attachments" not in email
-        calls.append(email)
-        extraction = Extraction(events=[event(event_quote=email["body"])])
-        return httpx.Response(200, json={"message": {"content": extraction.model_dump_json()}})
-
-    transport = httpx.MockTransport(respond)
-
-    def local_client(**kwargs):
-        assert kwargs["trust_env"] is False
-        return original_client(transport=transport, **kwargs)
-
-    monkeypatch.setattr(httpx, "Client", local_client)
-    settings = Settings(_env_file=None, ai_provider="ollama", enable_local_ai=True)
-    assert not settings.openai_api_key
-    assert not settings.enable_cloud_ai
-    for text in ["Votre colis est disponible", "Your parcel is ready for pickup", "Tu paquete esta disponible para recoger"]:
-        assert len(extract(message(text), settings)) == 1
-    assert len(calls) == 3
-
-
-def test_local_disabled_and_oversized_email_do_not_call_provider(monkeypatch):
-    import httpx
+def test_long_email_with_pickup_cue_stays_pending_with_diagnostic():
     import pytest
 
     from parcel_agent.config import Settings
     from parcel_agent.extract import extract
 
-    def unexpected_client(**kwargs):
-        raise AssertionError("Provider must not be contacted")
+    email = message("Your parcel is in transit but now ready for collection. " + "Details. " * 7000)
+    settings = Settings(_env_file=None, ai_provider="gemini", enable_cloud_ai=True, gemini_api_key="fake-test-key")
 
-    monkeypatch.setattr(httpx, "Client", unexpected_client)
-    with pytest.raises(ValueError, match="ENABLE_LOCAL_AI"):
-        extract(message("Private"), Settings(_env_file=None, ai_provider="ollama"))
-    with pytest.raises(ValueError, match="demasiado largo"):
-        extract(message("a" * 12_001), Settings(_env_file=None, ai_provider="ollama", enable_local_ai=True))
+    with pytest.raises(ValueError, match="Correo demasiado largo") as error:
+        extract(email, settings)
+
+    assert "60000" in str(error.value)
+    assert "Votre colis" in str(error.value)
 
 
-def test_local_rejects_remote_endpoints_and_cloud_model_tags():
+def test_only_gemini_provider_is_supported():
     import pytest
     from pydantic import ValidationError
 
     from parcel_agent.config import Settings
 
-    for url in ["http://example.com:11434", "https://127.0.0.1:11434", "http://127.0.0.1:11434/proxy", "http://user:pass@127.0.0.1:11434"]:
-        with pytest.raises(ValidationError):
-            Settings(_env_file=None, ai_provider="ollama", ollama_url=url)
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, ai_provider="ollama", ollama_model="qwen3:cloud")
-
-
-def test_local_failure_never_falls_back_to_paid_provider(monkeypatch):
-    import httpx
-    import pytest
-
-    from parcel_agent.config import Settings
-    from parcel_agent.extract import extract
-
-    original_client = httpx.Client
-    calls = []
-
-    def unavailable(request):
-        calls.append(str(request.url))
-        return httpx.Response(404, json={"error": "model not found"})
-
-    monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(transport=httpx.MockTransport(unavailable), **kwargs))
-    settings = Settings(_env_file=None, ai_provider="ollama", enable_local_ai=True, enable_cloud_ai=True, openai_api_key="fake-test-key")
-    with pytest.raises(httpx.HTTPStatusError):
-        extract(message("Private email"), settings)
-    assert calls == ["http://127.0.0.1:11434/api/chat"]
-
-
-def test_local_incomplete_results_are_not_accepted(monkeypatch):
-    import httpx
-    import pytest
-
-    from parcel_agent.config import Settings
-    from parcel_agent.extract import extract
-
-    original_client = httpx.Client
-    for metadata in [{"done": False}, {"done": True, "done_reason": "length"}]:
-        transport = httpx.MockTransport(lambda request: httpx.Response(200, json=dict(
-            metadata, message={"content": '{"events": []}'},
-        )))
-        monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(transport=transport, **kwargs))
-        with pytest.raises(ValueError, match="no completo"):
-            extract(message("Private email"), Settings(_env_file=None, ai_provider="ollama", enable_local_ai=True))
-
-
-def test_local_model_check_accepts_only_the_configured_download(monkeypatch):
-    import httpx
-    import pytest
-
-    from parcel_agent.config import Settings
-    from parcel_agent.extract import ensure_local_model
-
-    original_client = httpx.Client
-    settings = Settings(_env_file=None, ai_provider="ollama", enable_local_ai=True)
-    for model_name in ["qwen3:8b", "qwen3:4b"]:
-        def respond(request):
-            assert str(request.url) == "http://127.0.0.1:11434/api/tags"
-            return httpx.Response(200, json={"models": [{"name": model_name}]})
-
-        transport = httpx.MockTransport(respond)
-        monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(transport=transport, **kwargs))
-        if model_name == settings.ollama_model:
-            ensure_local_model(settings)
-        else:
-            with pytest.raises(ValueError, match="ollama pull"):
-                ensure_local_model(settings)
+        Settings(_env_file=None, ai_provider="unsupported")
 
 
 def test_gemini_configuration_requires_key_and_explicit_cloud_permission():
@@ -350,7 +230,6 @@ def test_gemini_quota_error_does_not_switch_provider(monkeypatch):
     monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(transport=httpx.MockTransport(unavailable), **kwargs))
     settings = Settings(
         _env_file=None, ai_provider="gemini", enable_cloud_ai=True, gemini_api_key="fake-test-key",
-        enable_local_ai=True, openai_api_key="also-configured-but-not-used",
     )
     with pytest.raises(httpx.HTTPStatusError):
         extract(message("Private email"), settings)

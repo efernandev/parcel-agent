@@ -19,7 +19,7 @@ uv run python -m uvicorn parcel_agent.app:app --host 127.0.0.1 --port 8765 --no-
 
 Abre <http://127.0.0.1:8765>. **Ver ejemplo** carga una demo con tres recogidas y un
 QR ficticio real, sin conectar cuentas ni modificar la base de datos. No hay que
-configurar Google ni OpenAI para probarla. Si el puerto esta ocupado, usa otro.
+configurar Gemini para probarla. Si el puerto esta ocupado, usa otro.
 
 No publiques este servidor en Internet ni lo arranques con `--host 0.0.0.0`:
 esta version es local y no tiene autenticacion de usuarios.
@@ -84,17 +84,14 @@ sus propiedades; no desactives globalmente las protecciones del equipo.
 	Tambien puedes usar el instalador oficial de `uv`. No hace falta instalar
 	Python manualmente: al abrir **`Iniciar Parcel.bat`**, `uv` instala una version
 	compatible de Python y prepara las dependencias fijadas en `uv.lock`.
-3. Para usar Ollama, crea `.env` a partir de la plantilla si aun no existe:
+3. Crea `.env` a partir de la plantilla si aun no existe:
 
 	```powershell
 	Copy-Item .env.example .env
 	```
 
-	Instala Ollama y descarga el modelo indicado en `.env` con `ollama pull
-	qwen3:8b`. Al seleccionar Ollama, Parcel intenta iniciar su servicio en segundo
-	plano si no esta activo; el comando `ollama` debe estar disponible en PATH. Si usas Gemini u OpenAI,
-	configura sus claves localmente en `.env` siguiendo sus secciones de este
-	README; nunca subas `.env` a Git. Sin una IA configurada puedes abrir la demo,
+	Configura `GEMINI_API_KEY` en `.env` con tu clave de Google AI Studio. No
+	compartas `.env` ni subas la clave a Git. Sin una clave configurada puedes abrir la demo,
 	pero no sincronizar correos reales.
 4. Para conectar Gmail, coloca el JSON OAuth de tipo **Desktop app** en la raiz
 	del proyecto como `credentials.json`. Puedes descargarlo de tu proyecto Google
@@ -179,16 +176,14 @@ la copia local. Para revocar el permiso en Google, visita
 
 ## Habilitar La IA
 
-### Elegir Entre Ollama Y Gemini
+### Usar Gemini Flash
 
-Abre **Conexion y privacidad**, selecciona el proveedor en **Modelo de IA** y
-pulsa **Aplicar modelo**. La seleccion se guarda en SQLite y se conserva al
-reiniciar; tiene prioridad sobre `AI_PROVIDER` de `.env`. No se permite cambiar
-durante una operacion. Seleccionar otro proveedor no inicia una sincronizacion.
+En **Conexion y privacidad**, confirma el envio de texto a Gemini y pulsa
+**Aplicar modelo**. La seleccion se guarda en SQLite. Aplicar el modelo no inicia
+una sincronizacion.
 
-No hay cambio automatico: si falla Ollama o Gemini, no se envia el correo a otro
-proveedor. Los correos que fallen quedan sin procesar y pueden reintentarse con
-la siguiente sincronizacion; los ya procesados correctamente no se repiten.
+Los correos que fallen quedan sin procesar y pueden reintentarse con la siguiente
+sincronizacion; los ya procesados correctamente no se repiten.
 
 Gemini requiere una clave escrita directamente en `.env` y permiso explicito de
 nube. No pegues la clave en el chat ni la subas a Git:
@@ -203,11 +198,13 @@ Reinicia AlPunto, selecciona Gemini Flash y confirma el envio de texto. La clave
 solo existe en el servidor; el selector no la devuelve ni la guarda en SQLite.
 Gemini recibe asunto, cuerpo y fecha, no adjuntos ni tokens de Gmail. Se pide
 JSON estructurado sin herramientas y se conservan las comprobaciones de evidencia.
-OpenAI se mantiene para configuraciones existentes.
 
 La pantalla comprueba configuracion de Gemini, no su facturacion, cuota ni validez
-de la clave. Los errores se detectan al realizar una peticion. Para Ollama tambien
-se comprueba si esta disponible el modelo local seleccionado.
+de la clave. Los errores se detectan al realizar una peticion.
+
+Los mensajes largos no se truncan. Si no contienen una senal clara de recogida,
+se omiten y se cuentan en el resumen; si la contienen, quedan pendientes y
+muestran el asunto y el tamano para poder revisarlos.
 
 ### Gemini: Cuota Gratuita Y Condiciones
 
@@ -228,94 +225,8 @@ incluyen requisitos sobre ofrecer aplicaciones a usuarios del EEE, Suiza o Reino
 Unido y reglas de tratamiento de datos que no equivalen a su precio. No asumas
 que disponer de cuota gratuita permite cualquier uso de correos personales.
 Si no puedes confirmar que tu uso esta permitido y sin coste, deja Gemini
-deshabilitado y utiliza Ollama en el PC personal. Nunca utilices un proveedor para
+deshabilitado. Nunca utilices un proveedor para
 sortear las restricciones de la organizacion en un ordenador corporativo.
-
-### Local: Ollama Y Qwen3
-
-La opcion local utiliza **Ollama y Qwen3 8B**, sin clave de OpenAI ni coste por
-consulta. El texto se procesa en este PC. Es un candidato multilingue: hay que
-contrastar sus resultados con los correos originales; no se garantiza precision.
-
-Instala [Ollama para Windows](https://ollama.com/download/windows), abre su app
-y descarga el modelo una vez (varios GB):
-
-```powershell
-ollama pull qwen3:8b
-ollama list
-```
-
-Si `ollama pull` falla con `tls: handshake failure`, la descarga no ha terminado.
-Revisa el acceso a los dominios oficiales con el administrador de la red; no
-desactives certificados ni cambies controles corporativos para forzarla. AlPunto
-detecta que falta el modelo y bloquea la sincronizacion antes de consultar Gmail.
-
-En un PC del trabajo, confirma que la instalacion y el tratamiento de correo
-personal estan autorizados. No desactives protecciones del equipo.
-
-La plantilla `.env.example` usa esta configuracion de prueba:
-
-```dotenv
-AI_PROVIDER=ollama
-ENABLE_LOCAL_AI=true
-OLLAMA_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=qwen3:8b
-ENABLE_CLOUD_AI=false
-SYNC_DAYS=7
-SYNC_LIMIT=5
-```
-
-Usala en `.env` sin sobrescribir configuraciones privadas existentes. Reinicia
-AlPunto tras cambiarla. En Conexion y privacidad, al aplicar Ollama, Parcel
-intenta iniciar el servicio en segundo plano si no responde. No abre la interfaz
-visual de Ollama; el comando `ollama` debe estar disponible en PATH. Se comprueba
-si Ollama responde y el modelo esta descargado. Esta comprobacion no mide
-precision ni velocidad de inferencia.
-
-La primera carga y la inferencia pueden ser lentas, especialmente por CPU.
-Los 32 GB de RAM no garantizan aceleracion de la grafica Intel ni una latencia
-concreta. Si 8B resulta demasiado lento, descarga `qwen3:4b` y cambia `OLLAMA_MODEL`
-a ese nombre. Se admiten `qwen3:4b`, `qwen3:8b` y `qwen3:14b`, no variantes cloud.
-
-AlPunto solo permite una URL de loopback para Ollama, evita el proxy del sistema
-y no recurre automaticamente a OpenAI si falla el modelo local. No expongas el
-puerto de Ollama a la red. Gmail sigue requiriendo Internet para recuperar correo.
-No se envian adjuntos al modelo. Los mensajes de mas de 12.000 caracteres y las
-respuestas incompletas o invalidas quedan sin procesar, sin recortes silenciosos.
-
-Primero valida el modelo con mensajes ficticios. Despues sincroniza una tanda
-pequena y compara puntos, fechas y codigos con Gmail. No se consulta Gmail ni se
-realiza inferencia automaticamente al arrancar la app. Sin coste por tokens no
-significa sin consumo de recursos y electricidad.
-
-### OpenAI Opcional
-
-Se mantiene la API de OpenAI para quien elija un servicio con facturacion
-independiente de ChatGPT. La extraccion externa esta **desactivada por defecto**.
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Edita `.env` localmente:
-
-```dotenv
-AI_PROVIDER=openai
-ENABLE_LOCAL_AI=false
-ENABLE_CLOUD_AI=true
-OPENAI_API_KEY=tu_clave_privada
-OPENAI_MODEL=gpt-4.1-mini
-SYNC_DAYS=90
-SYNC_LIMIT=100
-```
-
-No compartas la clave en el chat ni la subas a Git. Reinicia el servidor despues
-de cambiar la configuracion. **Habilitar la IA y pulsar Sincronizar autoriza el
-envio del asunto, cuerpo y fecha de los correos candidatos a OpenAI**. Pueden
-contener nombres, direcciones y codigos de recogida. No se envian adjuntos ni
-imagenes al modelo. Revisa las condiciones actuales de tratamiento y retencion de
-datos del proveedor antes de usarlo. No habilites esta opcion si quieres mantener
-el procesamiento local y sin coste por consulta.
 
 ## Uso
 

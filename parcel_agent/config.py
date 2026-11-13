@@ -12,13 +12,8 @@ ROOT = Path(__file__).resolve().parent.parent
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ROOT / ".env", extra="ignore")
 
-    ai_provider: Literal["openai", "ollama", "gemini"] = "openai"
-    enable_local_ai: bool = False
-    ollama_url: str = "http://127.0.0.1:11434"
-    ollama_model: Literal["qwen3:4b", "qwen3:8b", "qwen3:14b"] = "qwen3:8b"
+    ai_provider: Literal["gemini"] = "gemini"
     enable_cloud_ai: bool = False
-    openai_api_key: str = ""
-    openai_model: str = "gpt-4.1-mini"
     gemini_api_key: str = ""
     gemini_model: str = Field(default="gemini-3.6-flash", pattern=r"^gemini-[a-z0-9.-]+$")
     gmail_credentials_file: Path = ROOT / "credentials.json"
@@ -27,29 +22,10 @@ class Settings(BaseSettings):
     tailscale_url: str = ""
     tailscale_user: str = ""
 
-    @field_validator("ollama_url")
-    @classmethod
-    def validate_ollama_url(cls, value: str) -> str:
-        value = value.strip().rstrip("/")
-        parsed = urlsplit(value)
-        if (
-            parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
-            or not parsed.port or parsed.username or parsed.password
-            or parsed.path or parsed.query or parsed.fragment
-        ):
-            raise ValueError("OLLAMA_URL debe ser una URL HTTP local con puerto, como http://127.0.0.1:11434.")
-        return value
-
     @property
     def ai_configuration_error(self) -> str | None:
-        if self.ai_provider == "ollama":
-            return None if self.enable_local_ai else "Configura ENABLE_LOCAL_AI=true para habilitar Ollama local."
-        if self.ai_provider == "gemini":
-            if not self.enable_cloud_ai or not self.gemini_api_key:
-                return "Configura GEMINI_API_KEY y ENABLE_CLOUD_AI=true antes de sincronizar con Gemini."
-            return None
-        if not self.enable_cloud_ai or not self.openai_api_key:
-            return "Configura OPENAI_API_KEY y ENABLE_CLOUD_AI=true antes de sincronizar con OpenAI."
+        if not self.enable_cloud_ai or not self.gemini_api_key:
+            return "Configura GEMINI_API_KEY y ENABLE_CLOUD_AI=true antes de sincronizar con Gemini."
         return None
 
     @property
@@ -58,9 +34,7 @@ class Settings(BaseSettings):
 
     @property
     def ai_model(self) -> str:
-        if self.ai_provider == "ollama":
-            return self.ollama_model
-        return self.gemini_model if self.ai_provider == "gemini" else self.openai_model
+        return self.gemini_model
 
     @field_validator("tailscale_url")
     @classmethod

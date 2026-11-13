@@ -109,12 +109,15 @@ async function loadParcels() {
 }
 
 function showSyncResult(sync) {
+  const ignored = sync.ignored
+    ? ` Correos largos omitidos: ${sync.ignored}.`
+    : "";
   if (sync.running) {
-    message(`Revisando correos · ${sync.processed} procesados${sync.failed ? ` · ${sync.failed} sin procesar` : ""}`);
+    message(`Revisando correos · ${sync.processed} procesados${sync.ignored ? ` · ${sync.ignored} largos omitidos` : ""}${sync.failed ? ` · ${sync.failed} sin procesar` : ""}`);
   } else if (sync.error) {
-    message(`${sync.error}${sync.failed ? ` ${sync.failed} correo(s) pendiente(s) de procesar.` : ""}`, true);
-  } else if (sync.processed || sync.limited) {
-    message(`${sync.processed} correos procesados.${sync.limited ? " Quedan correos por revisar: vuelve a sincronizar." : " Bandeja actualizada."}`);
+    message(`${sync.error}${sync.failed ? ` ${sync.failed} correo(s) pendiente(s) de procesar.` : ""}${ignored}`, true);
+  } else if (sync.processed || sync.ignored || sync.limited) {
+    message(`${sync.processed} correos procesados.${ignored}${sync.limited ? " Quedan correos por revisar: vuelve a sincronizar." : " Bandeja actualizada."}`);
   }
 }
 
@@ -144,18 +147,14 @@ async function refreshStatus() {
 
 function showSettings() {
   if (!state.status) return;
-  const localAi = state.status.ai_provider === "ollama";
-  const cloudName = state.status.ai_provider === "gemini" ? "Google Gemini" : "OpenAI";
   $("#setup-status").innerHTML = [
     ["Google OAuth", state.status.google_configured ? "Configurado" : "Falta credentials.json"],
     ["Gmail", state.status.gmail_connected ? "Conectado · Solo lectura" : "Sin conectar"],
-    [localAi ? "IA local · Ollama" : `IA externa · ${cloudName}`, !state.status.ai_configured ? "Desactivada o sin configurar" : localAi && state.status.ai_ready === false ? "Modelo no disponible" : `Configurada · ${state.status.ai_model || ""}`],
+    ["IA externa · Google Gemini", !state.status.ai_configured ? "Desactivada o sin configurar" : `Configurada · ${state.status.ai_model || ""}`],
   ].map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("");
   $("#ai-readiness").textContent = state.status.ai_error || "";
   $("#ai-readiness").hidden = !state.status.ai_error;
-  $("#ai-privacy-copy").textContent = localAi
-    ? "Gmail es de solo lectura. Los correos candidatos se procesan con Ollama en este PC, sin enviarlos a proveedores externos. Parcel intenta iniciar Ollama al seleccionarlo; el modelo debe estar descargado."
-    : `Gmail es de solo lectura. Los correos candidatos se envian a ${cloudName} unicamente al sincronizar y con tu autorizacion. La disponibilidad, el uso de datos y el coste dependen de sus condiciones y de tu proyecto.`;
+  $("#ai-privacy-copy").textContent = "Gmail es de solo lectura. Al sincronizar, Gemini recibe el asunto, el texto y la fecha de los correos candidatos; no se envian adjuntos. La disponibilidad, el uso de datos y el coste dependen de tu proyecto y de las condiciones de Google.";
   $("#ai-provider").innerHTML = (state.status.ai_options || []).map((option) => `<option value="${escapeHtml(option.provider)}">${escapeHtml(option.label)} · ${escapeHtml(option.model)}${option.configured ? "" : " (sin configurar)"}</option>`).join("");
   $("#ai-provider").value = state.status.ai_provider;
   updateProviderConsent();
@@ -165,16 +164,11 @@ function showSettings() {
 }
 
 function updateProviderConsent() {
-  const provider = $("#ai-provider").value;
-  const external = provider !== "ollama";
-  $("#ai-consent-row").hidden = !external;
-  $("#ai-cloud-consent").required = external;
+  $("#ai-consent-row").hidden = false;
+  $("#ai-cloud-consent").required = true;
   $("#ai-cloud-consent").checked = false;
   $("#ai-selection-result").textContent = "";
-  $("#ai-provider-note").textContent = provider === "gemini"
-    ? "Gemini procesa el texto en Google. La cuota gratuita tiene limites. Para evitar cargos, utiliza un proyecto sin facturacion vinculada y revisa las condiciones aplicables a tu uso."
-    : external ? "El texto se envia a OpenAI. Revisa las condiciones y la facturacion de tu cuenta."
-      : "El texto se procesa en este PC. No se cambia a un proveedor externo si el modelo local falla.";
+  $("#ai-provider-note").textContent = "Gemini procesa el texto en Google. La cuota gratuita tiene limites. Para evitar cargos, utiliza un proyecto sin facturacion vinculada y revisa las condiciones aplicables a tu uso.";
 }
 
 function attachmentUrl(attachment) {
@@ -213,7 +207,7 @@ $("#ai-provider-form").onsubmit = async (event) => {
   event.preventDefault();
   const provider = $("#ai-provider").value;
   const cloudConsent = $("#ai-cloud-consent").checked;
-  if (provider !== "ollama" && !cloudConsent) { $("#ai-cloud-consent").reportValidity(); return; }
+  if (!cloudConsent) { $("#ai-cloud-consent").reportValidity(); return; }
   state.busy = true;
   renderConnection();
   try {

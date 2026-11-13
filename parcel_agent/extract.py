@@ -1,10 +1,6 @@
 import hashlib
 import json
-import os
 import re
-import shutil
-import subprocess
-import time
 from datetime import date
 from typing import Any, Literal
 
@@ -61,6 +57,26 @@ def normalize(value: str) -> str:
     return " ".join(value.split()).casefold()
 
 
+class IgnoredLongEmail(Exception):
+    pass
+
+
+PICKUP_READY_CUES = (
+    "ready for pickup", "ready for collection", "available for pickup",
+    "available for collection", "ready to collect", "available to collect",
+    "pickup code", "collection code", "collect your parcel", "awaiting collection",
+    "disponible au point relais", "disponible pour le retrait", "pret a retirer",
+    "prêt à retirer", "code de retrait", "a retirer avant", "à retirer avant",
+    "votre colis vous attend", "listo para recoger", "disponible para recoger",
+    "disponible para recogida", "codigo de recogida", "código de recogida",
+    "codigo de retiro", "código de retiro", "puedes recoger", "recogelo antes",
+    "recógelo antes",
+)
+def has_pickup_ready_cue(message: dict[str, Any]) -> bool:
+    text = normalize(message["subject"] + "\n" + message["text"])
+    return any(cue in text for cue in PICKUP_READY_CUES)
+
+
 def grounded(field: Evidence | None, source: str, transformed: bool = False) -> str | None:
     if not field or not field.value.strip() or not field.quote.strip():
         return None
@@ -114,9 +130,15 @@ def updates_from(extraction: Extraction, message: dict[str, Any]) -> list[dict[s
 def extract(message: dict[str, Any], settings: Settings) -> list[dict[str, Any]]:
     if settings.ai_configuration_error:
         raise ValueError(settings.ai_configuration_error)
-    text_limit = 12_000 if settings.ai_provider == "ollama" else 60_000
+    text_limit = 60_000
     if len(message["text"]) > text_limit:
-        raise ValueError("Correo demasiado largo: se mantiene sin procesar para evitar una lectura parcial.")
+        if not has_pickup_ready_cue(message):
+            raise IgnoredLongEmail
+        subject = " ".join(message["subject"].split())[:100] or "Sin asunto"
+        raise ValueError(
+            f"Correo demasiado largo ({len(message['text'])} caracteres; limite {text_limit}). "
+            f"Asunto: {subject}. Se mantiene sin procesar para evitar una lectura parcial."
+        )
     messages = [
         {"role": "system", "content": PROMPT},
         {"role": "user", "content": json.dumps({
@@ -125,12 +147,7 @@ def extract(message: dict[str, Any], settings: Settings) -> list[dict[str, Any]]
             "body": message["text"],
         }, ensure_ascii=False)},
     ]
-    if settings.ai_provider == "ollama":
-        content = extract_local(messages, settings)
-    elif settings.ai_provider == "gemini":
-        content = extract_gemini(messages, settings)
-    else:
-        content = extract_cloud(messages, settings)
+    content = extract_gemini(messages, settings)
     if not content:
         raise ValueError("La IA no ha devuelto un resultado. El correo se reintentara.")
     result = Extraction.model_validate_json(content)
@@ -138,74 +155,6 @@ def extract(message: dict[str, Any], settings: Settings) -> list[dict[str, Any]]
     if len(updates) != len(result.events):
         raise ValueError("Extraccion sin evidencia valida. El correo se mantiene pendiente de procesar.")
     return updates
-
-
-def ensure_local_model(settings: Settings) -> None:
-    with httpx.Client(timeout=5, trust_env=False) as client:
-        response = client.get(f"{settings.ollama_url}/api/tags")
-        response.raise_for_status()
-    models = response.json().get("models", [])
-    if not any(model.get("name") == settings.ollama_model for model in models):
-        raise ValueError(f"Falta el modelo local. Descargalo con ollama pull {settings.ollama_model} y recarga AlPunto.")
-
-
-def start_local_ollama_if_needed(settings: Settings) -> None:
-    def check_service() -> None:
-        with httpx.Client(timeout=1, trust_env=False) as client:
-            response = client.get(f"{settings.ollama_url}/api/tags")
-            response.raise_for_status()
-
-    try:
-        check_service()
-        return
-    except httpx.RequestError:
-        pass
-
-    executable = shutil.which("ollama")
-    if not executable:
-        raise ValueError("No se encuentra Ollama en este PC. Instala Ollama o abre su aplicacion.")
-
-    process_options = {}
-    if os.name == "nt":
-        process_options["creationflags"] = subprocess.CREATE_NO_WINDOW
-    else:
-        process_options["start_new_session"] = True
-    try:
-        subprocess.Popen(
-            [executable, "serve"], stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **process_options,
-        )
-    except OSError as error:
-        raise ValueError("No se pudo iniciar Ollama automaticamente. Abre su aplicacion e intenta de nuevo.") from error
-
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        try:
-            check_service()
-            return
-        except httpx.RequestError:
-            time.sleep(0.25)
-    raise ValueError("Ollama no respondio al iniciarse. Abre su aplicacion e intenta de nuevo.")
-
-
-def extract_local(messages: list[dict[str, str]], settings: Settings) -> str | None:
-    with httpx.Client(timeout=300, trust_env=False) as client:
-        response = client.post(
-            f"{settings.ollama_url}/api/chat",
-            json={
-                "model": settings.ollama_model,
-                "messages": messages,
-                "format": Extraction.model_json_schema(),
-                "stream": False,
-                "think": False,
-                "options": {"temperature": 0, "num_ctx": 16_384, "num_predict": 4096},
-            },
-        )
-        response.raise_for_status()
-    result = response.json()
-    if result.get("done") is False or result.get("done_reason") == "length":
-        raise ValueError("Ollama no completo la respuesta. El correo se mantiene sin procesar.")
-    return result.get("message", {}).get("content")
 
 
 def extract_gemini(messages: list[dict[str, str]], settings: Settings) -> str | None:
@@ -235,18 +184,6 @@ def extract_gemini(messages: list[dict[str, str]], settings: Settings) -> str | 
     return "".join(part.get("text", "") for part in parts if not part.get("thought"))
 
 
-def extract_cloud(messages: list[dict[str, str]], settings: Settings) -> str | None:
-    with httpx.Client(timeout=60) as client:
-        response = client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-            json={
-                "model": settings.openai_model,
-                "messages": messages,
-                "response_format": {"type": "json_schema", "json_schema": {
-                    "name": "pickup_events", "strict": True, "schema": Extraction.model_json_schema(),
-                }},
-            },
-        )
-        response.raise_for_status()
-    return response.json()["choices"][0]["message"].get("content")
+
+
+

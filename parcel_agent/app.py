@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from parcel_agent.config import ROOT, Settings
-from parcel_agent.extract import ensure_local_model, extract, start_local_ollama_if_needed
+from parcel_agent.extract import IgnoredLongEmail, extract
 from parcel_agent.gmail import Gmail
 from parcel_agent.store import Store
 
@@ -26,22 +26,13 @@ STATIC = Path(__file__).parent / "static"
 
 class AISelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    provider: Literal["ollama", "gemini", "openai"]
+    provider: Literal["gemini"]
     cloud_consent: bool = False
 
 
 def public_error(error: Exception, ai_provider: str | None = None) -> str:
     if isinstance(error, RefreshError):
         return "La autorizacion de Gmail ha caducado o fue revocada. Vuelve a conectar."
-    if ai_provider == "ollama":
-        if isinstance(error, httpx.HTTPStatusError):
-            if error.response.status_code == 404:
-                return "Ollama no encuentra el modelo. Descargalo con ollama pull y revisa OLLAMA_MODEL."
-            return f"Ollama devolvio HTTP {error.response.status_code}. Revisa la instalacion y el modelo local."
-        if isinstance(error, httpx.TimeoutException):
-            return "Ollama ha tardado demasiado. Reintenta o prueba qwen3:4b si el equipo no puede con 8b."
-        if isinstance(error, httpx.RequestError):
-            return "No se pudo conectar con Ollama local. Instala y abre Ollama antes de sincronizar."
     if isinstance(error, ValidationError):
         return "La IA devolvio datos con un formato no valido. El correo se mantiene sin procesar."
     if ai_provider == "gemini":
@@ -87,12 +78,12 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
     settings = settings or Settings()
     store = store or Store(ROOT / "data" / "parcels.db")
     saved_provider = store.selected_ai_provider()
-    if saved_provider in {"ollama", "gemini", "openai"}:
+    if saved_provider == "gemini":
         settings = settings.model_copy(update={"ai_provider": saved_provider})
     gmail = Gmail(settings)
     operation_lock = threading.Lock()
     state_lock = threading.Lock()
-    job: dict[str, Any] = {"running": False, "processed": 0, "failed": 0, "limited": False, "error": None}
+    job: dict[str, Any] = {"running": False, "processed": 0, "ignored": 0, "failed": 0, "limited": False, "error": None}
     workers: list[threading.Thread] = []
 
     @asynccontextmanager
@@ -169,22 +160,11 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             connected = False
             credential_error = "No se puede acceder al almacen seguro de credenciales del sistema."
         ai_error = current_settings.ai_configuration_error
-        if not ai_error and current_settings.ai_provider == "ollama":
-            try:
-                ensure_local_model(current_settings)
-            except Exception as error:
-                ai_error = public_error(error, "ollama")
-        providers = ["ollama", "gemini"]
-        if current_settings.openai_api_key or current_settings.ai_provider == "openai":
-            providers.append("openai")
         options = []
-        for provider in providers:
-            candidate = current_settings.model_copy(update={"ai_provider": provider})
-            options.append({
-                "provider": provider, "model": candidate.ai_model,
-                "configured": candidate.ai_configured,
-                "label": {"ollama": "Ollama local", "gemini": "Gemini Flash", "openai": "OpenAI"}[provider],
-            })
+        options.append({
+            "provider": "gemini", "model": current_settings.ai_model,
+            "configured": current_settings.ai_configured, "label": "Gemini Flash",
+        })
         return {
             "gmail_connected": connected,
             "google_configured": settings.credentials_path.is_file(),
@@ -204,21 +184,12 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         if not operation_lock.acquire(blocking=False):
             raise HTTPException(409, "Espera a que termine la operacion antes de cambiar de modelo.")
         try:
-            if selection.provider != "ollama" and not selection.cloud_consent:
+            if not selection.cloud_consent:
                 raise HTTPException(400, "Confirma el envio de correos al proveedor externo antes de seleccionarlo.")
             updated = settings.model_copy(update={"ai_provider": selection.provider})
             store.select_ai_provider(selection.provider)
             settings = updated
-            startup_error = None
-            if selection.provider == "ollama" and updated.ai_configured:
-                try:
-                    start_local_ollama_if_needed(updated)
-                except (ValueError, httpx.HTTPStatusError) as error:
-                    startup_error = public_error(error, "ollama")
-            result = status()
-            if startup_error and not result["ai_ready"]:
-                result["ai_error"] = startup_error
-            return result
+            return status()
         finally:
             operation_lock.release()
 
@@ -276,6 +247,10 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                     store.apply_message(message["id"], updates)
                     with state_lock:
                         job["processed"] += 1
+                except IgnoredLongEmail:
+                    store.apply_message(message["id"], [])
+                    with state_lock:
+                        job["ignored"] += 1
                 except Exception as error:
                     with state_lock:
                         job["failed"] += 1
@@ -295,9 +270,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         try:
             if settings.ai_configuration_error:
                 raise HTTPException(400, settings.ai_configuration_error)
-            if settings.ai_provider == "ollama":
-                ensure_local_model(settings)
-            update_job(running=True, processed=0, failed=0, limited=False, error=None,
+            update_job(running=True, processed=0, ignored=0, failed=0, limited=False, error=None,
                        provider=settings.ai_provider, model=settings.ai_model)
             workers[:] = [worker for worker in workers if worker.is_alive()]
             worker = threading.Thread(target=synchronize, daemon=True)

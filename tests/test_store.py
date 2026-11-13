@@ -47,5 +47,5 @@ def test_ai_selection_survives_reopen_without_changing_parcels(tmp_path):
     reopened = Store(path)
     assert reopened.selected_ai_provider() == "gemini"
     assert len(reopened.pending()) == 1
-    reopened.select_ai_provider("ollama")
-    assert store.selected_ai_provider() == "ollama"
+    reopened.select_ai_provider("gemini")
+    assert store.selected_ai_provider() == "gemini"
